@@ -49,20 +49,60 @@ export async function assertPublicUrl(url) {
 // fetch() that follows at most 5 redirects itself, checking each address first.
 // ponytail: the name is looked up here and again by fetch, so a DNS server answering differently the second time
 // could still reach a private address; pin the checked address with an undici Agent (connect.lookup) to close it.
+function fetchDebugUrl(value) {
+    try {
+        const u = new URL(value);
+        return `${u.origin}${u.pathname === '/' ? '' : '/[path]'}${u.search ? '?[redacted]' : ''}`;
+    } catch { return '[invalid URL]'; }
+}
+
+function fetchDebug(event, details) {
+    if (process.env.FETCH_PUBLIC_DEBUG !== '1') return;
+    console.info(`[fetchPublic] ${event}`, details);
+}
+
 export async function fetchPublic(url, init = {}) {
     let current = url;
     for (let hop = 0; hop <= 5; hop++) {
-        await assertPublicUrl(current);
-        const res = await fetch(current, { ...init, redirect: 'manual' });
+        try {
+            await assertPublicUrl(current);
+        } catch (e) {
+            fetchDebug('url-check-failed', { hop, url: fetchDebugUrl(current), error: e.code || e.name || 'Error' });
+            throw e;
+        }
+
+        let res;
+        try {
+            fetchDebug('request', { hop, url: fetchDebugUrl(current) });
+            res = await fetch(current, { ...init, redirect: 'manual' });
+        } catch (e) {
+            fetchDebug('request-failed', { hop, url: fetchDebugUrl(current), error: e.code || e.name || 'Error' });
+            throw e;
+        }
+
         if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
-            current = new URL(res.headers.get('location'), current).href;
+            const next = new URL(res.headers.get('location'), current).href;
+            fetchDebug('redirect', {
+                hop,
+                status: res.status,
+                from: fetchDebugUrl(current),
+                to: fetchDebugUrl(next),
+            });
             if (res.body) res.body.cancel().catch(() => {});
+            current = next;
             continue;
         }
+        fetchDebug('response', {
+            hop,
+            url: fetchDebugUrl(current),
+            status: res.status,
+            contentType: res.headers.get('content-type') || '',
+        });
         // Callers read res.url for file names; give it the final address.
         Object.defineProperty(res, 'url', { value: current });
         return res;
     }
+    fetchDebug('redirect-limit', { maxRedirects: 5, url: fetchDebugUrl(current) });
     throw new Error('The site kept redirecting. Try again, or open its page.');
 }
 
