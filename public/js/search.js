@@ -6,8 +6,9 @@
 // becomes a progress pill driven by the server's job events.
 import { $, $$, esc, api, icon, prefs, isPhone, size, toast, hideToast, toastId, copy, saveToDevice, sfx, anim, trapTab,
     paletteFor, spineFor, coverPalette, genCover, shortTitle, mix, rgba, hash, chevron, clientId, privPath } from './ui.js';
-import { app, bus, go, setBg, drawNav } from './app.js';
+import { app, bus, go, setBg, drawNav, showChrome } from './app.js';
 import { tidyName } from './rename.js';
+import { mountStorefront3d } from './storefront3d.js';
 
 const LIBS = {
     libgen: 'LibGen', annas: "Anna's Archive", archive: 'Internet Archive', gutenberg: 'Project Gutenberg', openstax: 'OpenStax',
@@ -18,10 +19,10 @@ const SHORT_SRC = { 'Library Genesis': 'LIBGEN', "Anna's Archive": "ANNA'S", 'In
 const srcName = s => (s === 'Library Genesis' ? 'LibGen' : s || '');
 const srcShort = s => SHORT_SRC[s] || String(s || '').toUpperCase();
 const LINK = {
-    direct: { text: 'direct file', ring: '#5EEAB4', bg: '#B9F5DC', dot: '#0E8A5B', dbg: 'rgba(94,234,180,0.2)', dfg: '#A6F7D8' },
-    page: { text: 'source page only', short: 'source page', ring: '#B9B5E6', bg: '#E4E0EE', dot: '#6B66B0', dbg: 'rgba(255,255,255,0.12)', dfg: '#E4E0FF' },
-    magnet: { text: 'magnet', ring: '#D68FE0', bg: '#F0D3FF', dot: '#9A3FB0', dbg: 'rgba(214,143,224,0.22)', dfg: '#F0C6F6' },
-    pending: { text: 'finding the file link', short: 'checking…', ring: 'rgba(255,255,255,0.55)', bg: 'rgba(255,255,255,0.6)', dot: '#8A86A8', dbg: 'rgba(255,255,255,0.1)', dfg: '#D8D3CC' },
+    direct: { text: 'direct file', ring: '#1e4a38', bg: '#e7f1ea', dot: '#1c4a2e', dbg: 'rgba(30,74,56,0.12)', dfg: '#c4d7c8' },
+    page: { text: 'source page only', short: 'source page', ring: '#8e6a35', bg: '#f5ead7', dot: '#8e6a35', dbg: 'rgba(142,106,53,0.12)', dfg: '#d6ba8e' },
+    magnet: { text: 'magnet', ring: '#597568', bg: '#e8eeea', dot: '#3d5b4e', dbg: 'rgba(89,117,104,0.14)', dfg: '#c5d3c8' },
+    pending: { text: 'finding the file link', short: 'checking…', ring: '#a7b0aa', bg: '#f1f2ee', dot: '#5f6c66', dbg: 'rgba(167,176,170,0.14)', dfg: '#c4cbc5' },
 };
 const FORMATS = { ebooks: ['epub', 'pdf', 'mobi', 'azw3'], audiobooks: ['m4b', 'mp3', 'zip'] };
 const PER_SHELF = 14;
@@ -96,7 +97,7 @@ export function unmount() {
     cancelAnimationFrame(maskRaf);
     clearTimeout(shelfTimer);
     if (overlay) { overlay.remove(); overlay = null; }
-    $('#topnav').style.visibility = '';
+    showChrome(true);
 }
 export function relayout() { if (location.pathname === '/results' && S.q) renderResults(); else renderDiscover(); }
 export const lastResults = () => (S.q ? resultsUrl() : null);
@@ -108,33 +109,511 @@ const modeSwitch = (cls = 'modeswitch') => `<div class="${cls}" role="radiogroup
 const goBtn = (sz, ic) => `<button type="submit" class="gobtn" aria-label="Find it" style="width:${sz}px;height:${sz}px">${icon('search', ic, 2.6)}</button>`;
 
 let overlay = null;
+let storefront3d = null;
+let pagehouseBag = [];
 function renderDiscover() {
+    if (storefront3d) { storefront3d.dispose(); storefront3d = null; }
+    showChrome(false);
     setBg('var(--glow-home)');
     const phone = isPhone();
-    root.innerHTML = `<div class="discover${phone ? ' phone' : ''}">
-        ${phone ? '<header class="brand"><img src="/img/crystal-mark.png" alt=""><span>RaveBSD</span></header>' : ''}
-        <h1 class="sr">Discover</h1>
-        <div class="barwrap" id="barwrap">
-          <form class="sform" id="dform" role="search">
-            <div class="bar" id="bar">
-              <div class="bar-ui" id="bar-ui">
-                ${phone ? '' : modeSwitch()}
-                <input type="text" id="q" placeholder="Search" aria-label="Search" autocomplete="off" spellcheck="false" enterkeyhint="search" value="${esc(S.q)}">
-                ${phone ? '' : `<button type="button" class="advbtn" data-act="adv" aria-expanded="false" aria-controls="adv" aria-label="Advanced search">${icon('sliders')}</button>`}
-                ${phone ? goBtn(48, 22) : goBtn(56, 26)}
-              </div>
-              <div class="bar-uif" id="bar-uif" aria-hidden="true"></div>
-              <div class="loader" id="loader" aria-hidden="true"><div class="fill" id="fill"></div></div>
-              <div class="blabel" id="blabel" aria-live="polite"></div>
-            </div>
-            ${phone ? `<div class="bar-ui2" id="bar-ui2">${modeSwitch('seg modes')}<button type="button" class="advbtn ph" data-act="adv" aria-expanded="false" aria-controls="adv" aria-label="Advanced search">${icon('sliders')}</button></div>` : ''}
-            ${phone ? '' : advPanel(false)}
-          </form>
+    const featuredBooks = [
+        { title: 'Ethiopia Unbound', author: 'J. E. Casely Hayford', tone: '#1f3b2d' },
+        { title: 'Gold Coast Native Institutions', author: 'J. E. Casely Hayford', tone: '#8c5f38' },
+        { title: 'The Interesting Narrative', author: 'Olaudah Equiano', tone: '#b18f58' },
+        { title: 'The Art of War', author: 'Sun Tzu', tone: '#6e2a1c' },
+    ];
+    root.innerHTML = `
+      <div class="discover storefront${phone ? ' phone' : ''}">
+        <div class="storefront-scene" aria-hidden="true">
+          <div class="storefront-glow"></div>
         </div>
-        ${phone ? advPanel(true) : ''}
-        <p class="derr err" id="derr" role="alert"></p>
-    </div>`;
-    $('#dform').addEventListener('submit', e => { e.preventDefault(); const q = $('#q').value.trim(); if (q) startSearch(q, null, true); else $('#q').focus(); });
+        <div class="storefront-shell">
+          <header class="top storefront-top" id="top">
+            <div class="wrap store-wrap">
+              <a class="brand" href="#"><span class="mono-mark" aria-hidden="true">Ph</span>Pagehouse</a>
+              <nav class="links" aria-label="Main">
+                <a href="#store">Shelves</a>
+                <a href="#categories">Categories</a>
+                <a href="#how">How it works</a>
+                <a href="#request">Requests</a>
+              </nav>
+              <span class="sp"></span>
+              <a class="ghost-btn" href="#request">Request a book</a>
+              <button class="bag-btn" type="button" id="topBag" aria-label="Bag, 0 books">
+                <span class="lbl">Bag</span><span class="c" id="topCount">0</span>
+              </button>
+            </div>
+          </header>
+
+          <section class="scene" id="scene" aria-label="Introduction">
+            <div class="stage" id="stage">
+              <canvas id="heroGL" aria-hidden="true"></canvas>
+              <div class="fallback" id="fallback" aria-hidden="true"></div>
+              <div class="beats">
+                <div class="beat" data-a="0" data-b=".2">
+                  <div class="wrap"><div class="in">
+                    <span class="eyebrow">Pagehouse · Accra</span>
+                    <h1>Books worth keeping, for <em>five cedis.</em></h1>
+                    <p>Explore enduring stories, ideas about society and self, and clear introductions to essential subjects.</p>
+                    <div class="ctas"><button type="button" class="btn light" data-scroll="#store">Browse the shelves</button><button type="button" class="btn line" data-scroll="#request">Request a book</button></div>
+                  </div></div>
+                </div>
+                <div class="beat" data-a=".3" data-b=".54">
+                  <div class="wrap"><div class="in">
+                    <span class="eyebrow">One price</span>
+                    <h2>Every title, <em>GH₵ 5.</em></h2>
+                    <p>No tiers and no subscriptions. Three books cost GH₵ 15. Find a starting point for a subject or follow an idea further.</p>
+                  </div></div>
+                </div>
+                <div class="beat" data-a=".64" data-b="1">
+                  <div class="wrap"><div class="in">
+                    <span class="eyebrow">Coming soon</span>
+                    <h2>Good books, <em>within reach.</em></h2>
+                    <p>Online ordering and downloads are not available yet. Browse the collection and explore what speaks to you.</p>
+                    <div class="ctas"><button type="button" class="btn light" data-scroll="#store">Start reading</button></div>
+                  </div></div>
+                </div>
+              </div>
+              <div class="rail-prog" aria-hidden="true"><span>01 PICK</span><span>02 PRICE</span><span>03 READ</span></div>
+              <div class="scroll-cue" id="cue" aria-hidden="true">SCROLL<i></i></div>
+              <div class="hsearch"><div class="wrap">
+                <form id="heroSearch" role="search" aria-label="Find a book">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                  <label for="hq" class="sr">Title, author or keyword</label>
+                  <input id="hq" type="search" placeholder="Search by title or author">
+                  <button class="btn light" type="submit">Search</button>
+                </form>
+              </div></div>
+            </div>
+          </section>
+
+          <section class="facts" aria-label="Why Pagehouse">
+            <div class="wrap store-wrap">
+              <div class="fact"><b>GH₵ 5, every book</b><span>One flat price, no subscriptions</span></div>
+              <div class="fact"><b>Curated by ideas</b><span>Browse across identity, society, learning and more</span></div>
+              <div class="fact"><b>For every reader</b><span>From first introductions to deeper reading</span></div>
+              <div class="fact"><b>GH₵ 5 per title</b><span>One clear price across the collection</span></div>
+            </div>
+          </section>
+
+          <section class="store" id="store" aria-labelledby="storeH">
+            <div class="wrap store-wrap">
+              <div class="sec-head">
+                <div><span class="eyebrow">The shelves</span><h2 id="storeH">Pick a book. Open it.</h2></div>
+                <p>Tap any cover to open it in 3D, see the first page and buy. Each book is GH₵ 5.</p>
+              </div>
+              <div class="shell">
+                <aside class="side" aria-label="Store navigation and bag">
+                  <nav class="box navbox" aria-label="Store">
+                    <button type="button" class="on" id="navShelves">Shelves</button>
+                    <button type="button" id="navAll">All books <span class="n">16</span></button>
+                    <a href="#categories">Categories</a>
+                    <a href="#request">Request a book</a>
+                    <a href="#checkout">Bag <span class="n" id="navCount">0</span></a>
+                  </nav>
+                  <section class="box bagbox" aria-labelledby="bagH">
+                    <div class="hd"><b id="bagH">Your bag</b><span id="bagN">0 books</span></div>
+                    <div class="stack" id="stack" aria-hidden="true"></div>
+                    <div class="tot"><span>Total</span><b id="bagTot">GH₵ 0.00</b></div>
+                    <a class="btn wide" href="#checkout">Checkout</a>
+                  </section>
+                  <a class="box reqbox" href="#request"><b>Can’t find a book?</b><span>Send the title and we’ll email you if it’s added within 30 days.</span><u>Request it →</u></a>
+                </aside>
+                <div class="box mainbox">
+                  <div class="toolbar">
+                    <div class="seg" role="group" aria-label="View">
+                      <button type="button" id="vShelves" aria-pressed="true">Shelves</button>
+                      <button type="button" id="vAll" aria-pressed="false">All books</button>
+                    </div>
+                    <form class="find" id="findForm" role="search">
+                      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5F6C66" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+                      <label for="q" class="sr">Search the store</label>
+                      <input id="q" type="search" placeholder="Search by title or author" autocomplete="off">
+                      <kbd aria-hidden="true">/</kbd>
+                    </form>
+                  </div>
+                  <div id="shelvesView"></div>
+                  <div id="allView" hidden></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="band" id="categories" aria-labelledby="catH">
+            <div class="wrap store-wrap">
+              <div class="sec-head"><div><span class="eyebrow">Explore ideas</span><h2 id="catH">Browse by subject</h2></div><p>Choose a field of life, a question, or a place to begin learning.</p></div>
+              <div class="cats" id="cats"></div>
+            </div>
+          </section>
+
+          <section class="band" id="how" aria-labelledby="howH">
+            <div class="wrap store-wrap">
+              <div class="sec-head"><div><span class="eyebrow">How it works</span><h2 id="howH">A simple way to find your next read</h2></div></div>
+              <div class="steps">
+                <div class="step"><span class="eyebrow">Step 1</span><b>Explore the collection</b><span>Browse by subject or search for a title or author.</span></div>
+                <div class="step"><span class="eyebrow">Step 2</span><b>Choose a book</b><span>Open a title to see its description and details.</span></div>
+                <div class="step"><span class="eyebrow">Step 3</span><b>Ordering is coming soon</b><span>Online checkout and book requests are not available yet.</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="band" id="request" aria-labelledby="reqH">
+            <div class="wrap two store-wrap">
+              <div class="sec-head" style="flex-direction:column;align-items:flex-start;margin:0">
+                <div><span class="eyebrow">Requests</span><h2 id="reqH">Can’t find a book?</h2></div>
+                <p>Share the title and author you are looking for. The request form is not connected yet, so your request will not be sent.</p>
+              </div>
+              <form class="card" id="reqForm">
+                <div class="field"><label for="r-title">Book title</label><input id="r-title" required placeholder="e.g. The Book of Disquiet"></div>
+                <div class="row2">
+                  <div class="field"><label for="r-author">Author</label><input id="r-author" required></div>
+                  <div class="field"><label for="r-isbn">ISBN or edition <em>(optional)</em></label><input id="r-isbn"></div>
+                </div>
+                <div class="row2">
+                  <div class="field"><label for="r-name">Your name</label><input id="r-name" autocomplete="name" required></div>
+                  <div class="field"><label for="r-email">Email</label><input id="r-email" type="email" autocomplete="email" required></div>
+                </div>
+                <button class="btn wide" type="submit">Send request</button>
+                <p class="done" id="reqDone" hidden>Book requests are not available yet. Your request was not sent.</p>
+              </form>
+            </div>
+          </section>
+
+          <section class="band" id="checkout" aria-labelledby="coH">
+            <div class="wrap store-wrap">
+              <div class="sec-head"><div><span class="eyebrow">Your selection</span><h2 id="coH">Your bag</h2></div><p>Online checkout is not available yet. No payment will be taken.</p></div>
+              <div class="two">
+                <div class="card">
+                  <ul class="baglist" id="bagList"></ul>
+                  <p class="empty" id="bagEmpty">Your bag is empty. Open a book on the shelves to add it.</p>
+                  <div class="total"><span>Total</span><b id="bagTotal">GH₵ 0.00</b></div>
+                </div>
+                <div class="card">
+                  <h3>Ordering is coming soon</h3>
+                  <p class="note">Checkout is not available yet. Your selection stays in this page; no order or payment will be submitted.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <footer>
+          <div class="wrap store-wrap">
+            <div><a class="brand" href="#"><span class="mono-mark" aria-hidden="true">Ph</span>Pagehouse</a><p style="margin:0;max-width:30ch;font-size:14px">Low-cost PDF books for readers in Ghana. Every title GH₵ 5.</p></div>
+            <div><h4>Store</h4><ul><li><a href="#store">Shelves</a></li><li><a href="#categories">Categories</a></li><li><a href="#checkout">Bag</a></li></ul></div>
+            <div><h4>Help</h4><ul><li><a href="#how">How it works</a></li><li><a href="#request">Request a book</a></li><li><a href="#how">Delivery and refunds</a></li></ul></div>
+            <div><h4>Legal</h4><ul><li><a href="#">Terms of Sale</a></li><li><a href="#">Privacy Policy</a></li><li><a href="#">Data protection (Act 843)</a></li></ul></div>
+            <div class="base"><span>© 2026 Pagehouse · Accra, Ghana</span><span>Books worth keeping, for every curious mind.</span></div>
+          </div>
+        </footer>
+
+        <div class="dlg" id="dlg" hidden role="dialog" aria-modal="true" aria-labelledby="vTitle">
+          <div class="dlg-back" data-close></div>
+          <div class="viewer">
+            <div class="vstage" id="vstage">
+              <canvas id="viewGL" aria-hidden="true"></canvas>
+              <span class="vhint">DRAG TO TURN THE BOOK</span>
+            </div>
+            <div class="vinfo">
+              <span class="eyebrow" id="vCat"></span>
+              <h2 id="vTitle"></h2>
+              <p class="by" id="vBy"></p>
+              <p class="desc" id="vDesc"></p>
+              <dl>
+                <div><dt>Format</dt><dd>PDF</dd></div>
+              </dl>
+              <div class="vprice"><b>GH₵ 5.00</b><span>Ordering coming soon</span></div>
+              <div class="vacts">
+                <button class="btn" type="button" id="vBuy">View bag</button>
+                <button class="btn line" type="button" id="vAdd" aria-pressed="false">Add to bag</button>
+              </div>
+              <p class="vfine">Online checkout is not available yet. No payment will be taken.</p>
+            </div>
+            <button class="vclose" type="button" data-close aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const dForm = document.getElementById('dform');
+    if (dForm) dForm.addEventListener('submit', e => { e.preventDefault(); const q = document.getElementById('q')?.value.trim(); if (q) startSearch(q, null, true); else document.getElementById('q')?.focus(); });
+    document.getElementById('heroSearch')?.addEventListener('submit', e => {
+        e.preventDefault();
+        const qv = document.getElementById('hq')?.value.trim();
+        if (!qv) return;
+        const qField = document.getElementById('q');
+        if (qField) qField.value = qv;
+        startSearch(qv, null, true);
+    });
+    document.querySelectorAll('[data-scroll]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const target = btn.getAttribute('data-scroll');
+            if (target) document.querySelector(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+
+    storefront3d = mountStorefront3d({
+        hero: $('#heroGL', root),
+        viewer: $('#viewGL', root),
+        scrollRoot: $('.discover.storefront', root),
+        scene: $('#scene', root),
+        stage: $('#stage', root),
+        beats: $$('.beat', root),
+        onProgress: updateHeroProgress,
+    });
+    initPagehouseStore();
+    setBg('var(--glow-home)');
+}
+
+function updateHeroProgress(progress) {
+    const active = [...$$('.beat', root)].find(beat => progress >= Number(beat.dataset.a) && progress <= Number(beat.dataset.b));
+    $$('.beat', root).forEach(beat => {
+        const isActive = beat === active;
+        beat.classList.toggle('active', isActive);
+        beat.setAttribute('aria-hidden', String(!isActive));
+    });
+    $$('.rail-prog span', root).forEach((step, index) => {
+        const ranges = [[0, .2], [.3, .54], [.64, 1]];
+        step.classList.toggle('on', progress >= ranges[index][0] && progress <= ranges[index][1]);
+    });
+}
+
+function initPagehouseStore() {
+    const PRICE = 5;
+    const fmt = n => `GH₵ ${n.toFixed(2)}`;
+    const CATS = {
+        identity: ['Identity & freedom', 'Culture, belonging and liberation', '#1F3B2D'],
+        society: ['Society & power', 'Institutions, leadership and strategy', '#9A5B2C'],
+        mind: ['Mind & character', 'Personal growth, behaviour and relationships', '#4E3360'],
+        learning: ['Foundations for learning', 'Accessible introductions to key subjects', '#22385A'],
+        imagination: ['Stories & imagination', 'Fiction, wonder and the uncanny', '#6E2A1C']
+    };
+    const books = [
+        { id: 'ethiopia', t: 'Ethiopia Unbound', a: 'J. E. Casely Hayford', y: 1911, c: 'identity', s: ['Project Gutenberg', 'Public domain'], bg: '#1F3B2D', fg: '#EFE9DC', d: 'One of the earliest African novels written in English, by the Gold Coast lawyer, journalist and nationalist.' },
+        { id: 'gcni', t: 'Gold Coast Native Institutions', a: 'J. E. Casely Hayford', y: 1903, c: 'society', s: ['Project Gutenberg', 'Public domain'], bg: '#9A5B2C', fg: '#FBF1E6', d: 'A foundational study of customary law and governance in the Gold Coast.' },
+        { id: 'equiano', t: 'The Interesting Narrative', a: 'Olaudah Equiano', y: 1789, c: 'identity', s: ['Project Gutenberg', 'Public domain'], bg: '#C8B88E', fg: '#22201A', d: 'Equiano’s journey from capture to freedom and the long arc of abolition.' },
+        { id: 'blyden', t: 'Christianity, Islam and the Negro Race', a: 'Edward Wilmot Blyden', y: 1887, c: 'identity', s: ['Project Gutenberg', 'Public domain'], bg: '#2B4557', fg: '#EEF2F4', d: 'Essays on religion, education and the future of West Africa.' },
+        { id: 'upfrom', t: 'Up from Slavery', a: 'Booker T. Washington', y: 1901, c: 'identity', s: ['Project Gutenberg', 'Public domain'], bg: '#38404D', fg: '#E8EBF0', d: 'A classic autobiography on self-reliance, education and social mobility.' },
+        { id: 'meditations', t: 'Meditations', a: 'Marcus Aurelius', y: 180, c: 'mind', s: ['Project Gutenberg', 'Public domain'], bg: '#23262A', fg: '#ECEAE6', d: 'Private notes on duty, calm and how to live well.' },
+        { id: 'artofwar', t: 'The Art of War', a: 'Sun Tzu', y: -500, c: 'society', s: ['Project Gutenberg', 'Public domain'], bg: '#6E2A1C', fg: '#F4E9E1', d: 'Still read for strategy, planning and tactical clarity.' },
+        { id: 'prince', t: 'The Prince', a: 'Niccolò Machiavelli', y: 1532, c: 'society', s: ['Project Gutenberg', 'Public domain'], bg: '#4E3360', fg: '#F3EEF6', d: 'A blunt handbook on how rulers gain and keep power.' },
+        { id: 'pride', t: 'Pride and Prejudice', a: 'Jane Austen', y: 1813, c: 'imagination', s: ['Project Gutenberg', 'Public domain'], bg: '#D8CCBB', fg: '#2A2420', d: 'Sharp, funny and deeply observant: a timeless social comedy.' },
+        { id: 'frankenstein', t: 'Frankenstein', a: 'Mary Shelley', y: 1818, c: 'imagination', s: ['Project Gutenberg', 'Public domain'], bg: '#2F3A48', fg: '#E8EBF0', d: 'The novel that began modern science fiction.' },
+        { id: 'dracula', t: 'Dracula', a: 'Bram Stoker', y: 1897, c: 'imagination', s: ['Project Gutenberg', 'Public domain'], bg: '#3A1013', fg: '#F4E6E6', d: 'A letter-and-diary chase across Europe by a formidable enemy.' },
+        { id: 'bio', t: 'Biology 2e', a: 'OpenStax', y: 2018, c: 'learning', s: ['OpenStax', 'CC BY 4.0'], bg: '#3F6B3C', fg: '#F1F5EE', d: 'A full two-semester survey of cells, genetics and ecology.' },
+        { id: 'econ', t: 'Principles of Economics', a: 'OpenStax', y: 2017, c: 'learning', s: ['OpenStax', 'CC BY 4.0'], bg: '#E2E7E2', fg: '#183028', d: 'A first-year economics course on markets, prices and trade.' },
+        { id: 'stats', t: 'Introductory Statistics', a: 'OpenStax', y: 2013, c: 'learning', s: ['OpenStax', 'CC BY 4.0'], bg: '#22385A', fg: '#EAF0F8', d: 'Probability, data science and experimental reasoning for beginners.' },
+        { id: 'psych', t: 'Psychology 2e', a: 'OpenStax', y: 2020, c: 'mind', s: ['OpenStax', 'CC BY 4.0'], bg: '#A8443A', fg: '#FBEDEA', d: 'Memory, development and mental health in one accessible course.' }
+    ];
+    const byId = Object.fromEntries(books.map(b => [b.id, b]));
+    const shelves = [
+        { n: 'New arrivals', ids: ['ethiopia', 'meditations', 'frankenstein', 'artofwar', 'pride', 'blyden', 'equiano'] },
+        { n: 'Identity & freedom', c: 'identity', ids: ['ethiopia', 'equiano', 'blyden', 'upfrom'] },
+        { n: 'Society & power', c: 'society', ids: ['gcni', 'artofwar', 'prince'] },
+        { n: 'Mind & character', c: 'mind', ids: ['meditations', 'psych'] },
+        { n: 'Foundations for learning', c: 'learning', ids: ['econ', 'stats', 'bio'] },
+        { n: 'Stories & imagination', c: 'imagination', ids: ['pride', 'frankenstein', 'dracula'] }
+    ];
+    const bag = pagehouseBag;
+    let current = null;
+    let catFilter = '';
+    const storefront = $('.discover.storefront', root);
+    const scrollToSection = id => {
+        const target = document.getElementById(id);
+        if (target) target.scrollIntoView({ behavior: prefs.motion ? 'smooth' : 'auto', block: 'start' });
+    };
+
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const coverBtn = (book, span) => {
+        const tag = span ? 'span' : 'button';
+        const attrs = span ? '' : ` type="button" aria-label="Open ${esc(book.t)} by ${esc(book.a)}, GH₵ 5"`;
+        return `<${tag}${attrs} class="bk" data-id="${book.id}" style="background:${book.bg};color:${book.fg}">${
+            `<span class="a">${esc(book.a)}</span><span class="t">${esc(book.t)}</span><span class="ed">PAGEHOUSE</span>`
+        }</${tag}>`;
+    };
+
+    const updateBag = () => {
+        const n = bag.length;
+        const label = `${n} book${n === 1 ? '' : 's'}`;
+        const sum = fmt(n * PRICE);
+        const topCount = document.getElementById('topCount');
+        if (topCount) topCount.textContent = String(n);
+        document.getElementById('topBag')?.setAttribute('aria-label', `Bag, ${label}`);
+        const navCount = document.getElementById('navCount');
+        if (navCount) navCount.textContent = String(n);
+        const bagN = document.getElementById('bagN');
+        if (bagN) bagN.textContent = label;
+        const bagTot = document.getElementById('bagTot');
+        if (bagTot) bagTot.textContent = sum;
+        const bagList = document.getElementById('bagList');
+        if (bagList) {
+            bagList.innerHTML = bag.map(id => {
+                const b = byId[id];
+                return `<li><span class="sw" style="background:${b.bg}"></span><div class="nm">${esc(b.t)}<span>${esc(b.a)} · PDF</span></div><span class="pr">GH₵ 5.00</span><button type="button" data-add="${id}" aria-label="Remove ${esc(b.t)}">Remove</button></li>`;
+            }).join('');
+        }
+        const stack = document.getElementById('stack');
+        if (stack) {
+            stack.innerHTML = n ? bag.slice(-3).map(id => coverBtn(byId[id], true)).join('') : '<span class="none">Nothing here yet</span>';
+        }
+        const bagTotal = document.getElementById('bagTotal');
+        if (bagTotal) bagTotal.textContent = sum;
+        const bagEmpty = document.getElementById('bagEmpty');
+        if (bagEmpty) bagEmpty.hidden = n > 0;
+        document.querySelectorAll('.add[data-add]').forEach(btn => {
+            const target = btn.getAttribute('data-add');
+            const on = bag.includes(target);
+            btn.textContent = on ? 'In your bag' : 'Add to bag';
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        if (current) {
+            const vAdd = document.getElementById('vAdd');
+            if (vAdd) {
+                const on = bag.includes(current.id);
+                vAdd.textContent = on ? 'In your bag' : 'Add to bag';
+                vAdd.setAttribute('aria-pressed', on ? 'true' : 'false');
+            }
+        }
+    };
+
+    const renderShelves = () => {
+        const el = document.getElementById('shelvesView');
+        if (!el) return;
+        el.innerHTML = shelves.map(s => `
+            <section class="shelfsec">
+                <div class="shelfhd"><h3>${esc(s.n)}<small>${s.ids.length} TITLES</small></h3>
+                <button type="button" class="linkbtn" data-cat="${s.c || ''}">${s.c ? 'Full shelf' : 'All books'} <span aria-hidden="true">→</span></button></div>
+                <div class="rail">${s.ids.map(id => coverBtn(byId[id])).join('')}</div>
+                <div class="plank" aria-hidden="true"></div>
+            </section>
+        `).join('');
+    };
+
+    const renderAll = () => {
+        const el = document.getElementById('allView');
+        if (!el) return;
+        const q = (document.getElementById('q')?.value || '').trim().toLowerCase();
+        const list = books.filter(b => (!catFilter || b.c === catFilter) && (!q || `${b.t} ${b.a}`.toLowerCase().includes(q)));
+        const head = q ? `Results for “${esc(document.getElementById('q').value.trim())}”` : catFilter ? esc(CATS[catFilter][0]) : 'All books';
+        let html = `<div class="allhd"><h3>${head}</h3><span>${list.length} TITLE${list.length === 1 ? '' : 'S'} · GH₵ 5 EACH</span></div>`;
+        if (list.length) {
+            html += `<div class="grid">${list.map(b => `<div class="cell">${coverBtn(b)}<div class="nm">${esc(b.t)}<span>${esc(b.a)}</span></div><button type="button" class="add" data-add="${b.id}" aria-pressed="false">Add to bag</button></div>`).join('')}</div>`;
+        } else {
+            html += `<div class="miss"><b>No match for “${esc((document.getElementById('q')?.value || '').trim())}”</b><p>Try another search or check back later. Book requests are not available yet.</p><button type="button" class="btn" id="missReq">Request this book</button></div>`;
+        }
+        el.innerHTML = html;
+        const missReq = document.getElementById('missReq');
+        if (missReq) missReq.addEventListener('click', () => { const r = document.getElementById('r-title'); if (r) r.value = (document.getElementById('q')?.value || '').trim(); document.getElementById('request')?.scrollIntoView({ behavior: 'smooth' }); });
+        updateBag();
+    };
+
+    const go = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const toggle = id => { const idx = bag.indexOf(id); if (idx < 0) bag.push(id); else bag.splice(idx, 1); updateBag(); };
+
+    const showAll = on => {
+        const shelvesView = document.getElementById('shelvesView');
+        const allView = document.getElementById('allView');
+        const vS = document.getElementById('vShelves');
+        const vA = document.getElementById('vAll');
+        if (shelvesView) shelvesView.hidden = on;
+        if (allView) allView.hidden = !on;
+        if (vS) vS.setAttribute('aria-pressed', String(!on));
+        if (vA) vA.setAttribute('aria-pressed', String(on));
+        const navShelves = document.getElementById('navShelves');
+        const navAll = document.getElementById('navAll');
+        if (navShelves) navShelves.classList.toggle('on', !on);
+        if (navAll) navAll.classList.toggle('on', on);
+    };
+
+    const viewShelves = () => {
+        const q = document.getElementById('q'); if (q) q.value = ''; catFilter = ''; showAll(false); renderAll();
+    };
+    const viewAll = () => { catFilter = ''; renderAll(); showAll(true); };
+
+    document.getElementById('vShelves')?.addEventListener('click', viewShelves);
+    document.getElementById('vAll')?.addEventListener('click', viewAll);
+    document.getElementById('navShelves')?.addEventListener('click', viewShelves);
+    document.getElementById('navAll')?.addEventListener('click', viewAll);
+    document.getElementById('topBag')?.addEventListener('click', () => scrollToSection('checkout'));
+    document.getElementById('findForm')?.addEventListener('submit', e => {
+        e.preventDefault();
+        const q = document.getElementById('q')?.value.trim();
+        if (q) startSearch(q, null, true);
+    });
+    storefront.addEventListener('keydown', e => {
+        if (e.key === '/' && !document.querySelector('.dlg[hidden="false"]') && !/INPUT|TEXTAREA/.test(document.activeElement?.tagName || '')) {
+            e.preventDefault(); document.getElementById('q')?.focus();
+        }
+    });
+
+    document.getElementById('cats').innerHTML = Object.keys(CATS).map(k => {
+        const c = CATS[k];
+        const n = books.filter(b => b.c === k).length;
+        return `<button type="button" class="cat" data-cat="${k}"><span class="sw" style="background:${c[2]}"></span><span><b>${esc(c[0])}</b><span>${esc(c[1])}</span></span><span class="num">${n}</span></button>`;
+    }).join('');
+
+    storefront.addEventListener('click', e => {
+        const catBtn = e.target.closest('[data-cat]');
+        if (catBtn) {
+            const k = catBtn.getAttribute('data-cat');
+            const q = document.getElementById('q'); if (q) q.value = ''; catFilter = k; renderAll(); showAll(true); scrollToSection('store');
+            return;
+        }
+        const addBtn = e.target.closest('[data-add]');
+        if (addBtn) { toggle(addBtn.getAttribute('data-add')); return; }
+        const bk = e.target.closest('button.bk');
+        if (bk) {
+            const id = bk.getAttribute('data-id');
+            const item = byId[id];
+            current = item;
+            const dlg = document.getElementById('dlg');
+            if (dlg) {
+                document.getElementById('vCat').textContent = CATS[item.c][0];
+                document.getElementById('vTitle').textContent = item.t;
+                document.getElementById('vBy').textContent = `${item.a} · ${item.y}`;
+                document.getElementById('vDesc').textContent = item.d;
+                document.getElementById('vAdd').setAttribute('aria-pressed', bag.includes(item.id) ? 'true' : 'false');
+                document.getElementById('vAdd').textContent = bag.includes(item.id) ? 'In your bag' : 'Add to bag';
+                storefront3d?.setBook(item);
+                dlg.hidden = false;
+                document.documentElement.style.overflow = 'hidden';
+                storefront3d?.refresh();
+            }
+        }
+    });
+
+    document.getElementById('vAdd')?.addEventListener('click', () => current && toggle(current.id));
+    document.getElementById('vBuy')?.addEventListener('click', () => {
+        if (!current) return;
+        if (!bag.includes(current.id)) bag.push(current.id);
+        updateBag();
+        const dlg = document.getElementById('dlg');
+        if (dlg) { dlg.hidden = true; document.documentElement.style.overflow = ''; }
+        scrollToSection('checkout');
+    });
+    document.getElementById('reqForm')?.addEventListener('submit', e => {
+        e.preventDefault();
+        const message = document.getElementById('reqDone');
+        message.textContent = 'Book requests are not available yet. Your request was not sent.';
+        message.hidden = false;
+    });
+    storefront.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', () => {
+        const dlg = document.getElementById('dlg'); if (dlg) { dlg.hidden = true; document.documentElement.style.overflow = ''; }
+    }));
+    renderShelves();
+    renderAll();
+    updateBag();
+    showAll(false);
+
+    const topBar = document.getElementById('top');
+    if (topBar) {
+        const updateTone = () => {
+            const scene = document.getElementById('scene');
+            if (scene) topBar.classList.toggle('day', scene.getBoundingClientRect().bottom < 80);
+        };
+        storefront.addEventListener('scroll', updateTone, { passive: true });
+        updateTone();
+    }
 }
 
 function advPanel(phone) {
@@ -217,9 +696,17 @@ async function startSearch(q, adv, fromDiscover) {
     resolveQueue.length = 0;
     resetFilters();
     if (fromDiscover) toggleAdv(false);
-    const flow = fromDiscover ? discoverFlow(seq) : null;
+    const flow = fromDiscover && $('#barwrap') ? discoverFlow(seq) : null;
     app.lastResults = resultsUrl();
-    if (!fromDiscover) { S.settleOnce = true; history.replaceState({ keepScroll: true }, '', app.lastResults); drawNav(); renderResults(); }
+    if (fromDiscover && !flow) {
+        if (storefront3d) { storefront3d.dispose(); storefront3d = null; }
+        $('.discover.storefront', root)?.remove();
+        if (location.pathname === '/results') history.replaceState({ keepScroll: true }, '', app.lastResults);
+        else history.pushState({ keepScroll: true }, '', app.lastResults);
+        drawNav('/results');
+        showChrome(true);
+        renderResults();
+    } else if (!fromDiscover) { S.settleOnce = true; history.replaceState({ keepScroll: true }, '', app.lastResults); drawNav(); renderResults(); }
     try {
         const res = await fetch(searchUrl(q, S.mode, adv), { credentials: 'same-origin' });
         if (res.status === 401) { location.reload(); return; }
@@ -397,7 +884,7 @@ function discoverFlow(seq) {
         page = renderResults({ hidden: true });
         if (!motion) return done(true);
         label.textContent = S.error ? S.error : S.results.length ? `Found ${S.results.length} result${S.results.length === 1 ? '' : 's'}` : 'Nothing found';
-        label.style.color = S.error ? '#FF8A65' : '#5EEAB4';
+        label.style.color = S.error ? '#a33b37' : '#1e4a38';
         await wait(800);
         if (!alive()) return;
         // 3. Back into a search bar.
@@ -519,12 +1006,11 @@ async function applyPalette(r) {
     if (r && r.coverUrl) { const cp = await coverPalette(coverSrc(r)); if (cp) p = cp; }
     if (!r || r.id !== S.sel) return;
     const c = p.c;
-    const audio = S.mode === 'audiobooks';
-    setBg(`radial-gradient(900px 640px at ${audio ? '100%' : '0%'} 0%, ${rgba(c[0], 0.3)}, transparent 62%), radial-gradient(800px 600px at ${audio ? '0%' : '100%'} 8%, ${rgba(c[1], 0.28)}, transparent 60%), radial-gradient(900px 700px at 50% 58%, ${rgba(c[2], 0.4)}, transparent 65%), radial-gradient(1000px 700px at 50% 100%, ${rgba(c[1], 0.2)}, transparent 62%), ${mix(c[2], '#000000', 0.86)}`);
+    setBg('var(--ground)');
     const card = $('.rcard');
     if (card) {
         card.style.background = `linear-gradient(135deg,${mix(c[0], '#FFFFFF', 0.62)} 0%,${mix(c[1], '#FFFFFF', 0.6)} 100%)`;
-        if (!isPhone()) card.style.boxShadow = `0 24px 70px ${rgba(c[1], 0.35)}`;
+        if (!isPhone()) card.style.boxShadow = `0 8px 26px ${rgba(c[1], 0.14)}`;
     }
     $$('.cassette-body').forEach(el => { el.style.background = `linear-gradient(160deg,${c[0]},${c[1]})`; });
     $$('.cover-back').forEach(el => { el.style.background = `linear-gradient(160deg,${mix(c[2], '#FFFFFF', 0.15)},${mix(c[2], '#000000', 0.45)})`; });
@@ -591,7 +1077,7 @@ function refreshResults() {
 const advBtn = cls => `<button type="button" class="advbtn ${cls}" data-act="adv" aria-expanded="false" aria-controls="adv" aria-label="Advanced search" title="Advanced search">${icon('sliders', cls ? 18 : 22)}</button>`;
 function resultsBar(phone) {
     if (phone) return `<form class="rform ph" id="rform" role="search">
-        <div class="rtop"><img src="/img/crystal-mark.png" alt="RaveBSD" class="rlogo">
+        <div class="rtop"><span class="rlogo" aria-hidden="true">Ph</span>
           <div class="rbar ph" id="rbar"><input type="text" id="rq" aria-label="Search" autocomplete="off" spellcheck="false" enterkeyhint="search">${advBtn('sm')}${goBtn(40, 20)}</div></div>
         <div class="rrow">${modeSwitch('seg modes sm')}
           <div class="seg icons sm" role="radiogroup" aria-label="View">${viewBtns()}</div></div></form>${advPanel(true)}`;
@@ -605,7 +1091,7 @@ const viewBtns = () => [['shelf', 'Shelf view', 'shelf'], ['list', 'List view', 
 function heading(list) {
     const audio = S.mode === 'audiobooks';
     const n = S.results.length, total = S.sources.length, answered = S.answered.length;
-    const qcol = audio ? '#FF9FE8' : '#FFD54A';
+    const qcol = audio ? '#597568' : '#8e6a35';
     let title;
     if (S.searching && !n) title = `Searching for <span class="serif" style="color:${qcol}">“${esc(S.q)}”</span>`;
     else title = `${n} result${n === 1 ? '' : 's'} for <span class="serif" style="color:${qcol}">“${esc(S.q)}”</span>`;
@@ -682,7 +1168,7 @@ function spineHtml(r, phone) {
     const w = phone ? 28 + (h % 10) : 44 + (h % 15), ht = phone ? 162 + (h % 36) : 265 + (h % 66);
     const fs = phone ? 10 : w >= 52 ? 16 : w >= 48 ? 15 : 14;
     return `<button type="button" class="spine${r.onShelf ? ' onshelf' : ''}" role="option" aria-selected="false" aria-label="${esc(label)}" data-act="pick" data-id="${esc(r.id)}" tabindex="-1" style="width:${w}px;height:${ht}px;background:${sp.bg};color:${sp.ink}">
-        <span class="sd" style="background:${sp.dark ? '#0F0E2A' : '#14123A'};${r.onShelf ? '' : `box-shadow:inset 0 0 0 ${phone ? 1.5 : 2}px ${lt.ring}`}"></span>
+        <span class="sd" style="background:${sp.dark ? '#0d1210' : '#14201a'};${r.onShelf ? '' : `box-shadow:inset 0 0 0 ${phone ? 1.5 : 2}px ${lt.ring}`}"></span>
         <span class="vt"><b style="font-size:${fs}px">${esc(spineTitle(r.title))}</b><small>${esc(srcShort(r.source))}</small></span>
         <span class="sf">${r.onShelf ? 'ON SHELF' : esc(fmt)}</span></button>`;
 }
@@ -770,7 +1256,7 @@ function ctaState(r) {
     const d = S.dl[r.id];
     if (d) {
         if (d.state === 'queued' || d.state === 'waiting') return { text: d.wait === 'slot' ? 'Waiting for a free slot' : d.wait === 'vpn' ? 'Waiting for the VPN tunnel' : 'Queued on the server', cls: 'st-queued' };
-        if (d.state === 'downloading') { const p = Math.round((d.progress || 0) * 100); return { text: `Downloading · ${p}%`, cls: 'st-dl', style: `background:linear-gradient(90deg,#5EEAB4 ${p}%,#D9D4FF ${p}%)` }; }
+        if (d.state === 'downloading') { const p = Math.round((d.progress || 0) * 100); return { text: `Downloading · ${p}%`, cls: 'st-dl', style: `background:linear-gradient(90deg,#1e4a38 ${p}%,#dce0d8 ${p}%)` }; }
         if (d.state === 'renaming') return { text: 'Renaming and filing…', cls: 'st-ren' };
         if (d.state === 'done' && d.shelfId) return app.settings && app.settings.saving.allow ? { text: d.saved ? 'Saved to this device ✓' : 'Save to this device', cls: 'st-save', act: 'save' } : { text: 'On the shelf ✓', cls: 'st-on', act: 'goshelf' };
         if (d.state === 'done') return { text: 'Already on your shelf', cls: 'st-on', act: 'goshelf' };
@@ -877,7 +1363,7 @@ function stackRows(page, delay = 0) {
 }
 
 // ── More places ──────────────────────────────────────────────────────────────
-const PILL_COLOURS = ['#FFB4A2', '#8FD0FF', '#B7A4FF', '#5EEAB4', '#FFD54A', '#FF9FE8', '#FFC070', '#A8F0FF'];
+const PILL_COLOURS = ['#eadfcc', '#dce5df', '#e7f1ea', '#d5a58b', '#e8c48a', '#bfd2c5', '#f5ead7', '#c5d3c8'];
 // When SLUM says a link's mirror is worse than another of the same library, point the link at the better one.
 const RANK = { up: 0, degraded: 1, protected: 2, unknown: 2.5, down: 3 };
 function bestMirror(url) {

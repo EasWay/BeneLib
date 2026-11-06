@@ -38,7 +38,7 @@ document.addEventListener('click', e => {
     go(url.pathname + url.search + url.hash);
 });
 
-const PAGE_BG = { '/': 'var(--glow-home)', '/results': null, '/shelf': 'var(--glow-shelf)', '/shelf/stats': 'var(--glow-shelf)', '/settings': 'var(--glow-settings)', '/admin': 'var(--glow-settings)' };
+const PAGE_BG = { '/': 'var(--glow-home)', '/results': 'var(--ground)', '/shelf': 'var(--ground)', '/shelf/stats': 'var(--ground)', '/settings': 'var(--ground)', '/admin': 'var(--ground)' };
 export function setBg(css) { $('#bg').style.background = css; }
 
 async function render() {
@@ -58,20 +58,20 @@ async function render() {
 }
 
 // ── Nav ──────────────────────────────────────────────────────────────────────
-const TABS = [['/', 'Discover', 'search'], ['/shelf', 'Shelf', 'shelf'], ['/settings', 'Settings', 'sliders']];
+const TABS = [['/', 'Store', 'shelf'], ['/shelf', 'Your shelf', 'shelf'], ['/settings', 'Settings', 'sliders']];
 // The admin panel lives under the Settings tab.
 const tabOn = (path, href) => (href === '/' ? path === '/' || path === '/results' : href === '/settings' ? path.startsWith('/settings') || path === '/admin' : path.startsWith(href));
 function badges() {
     const s = app.status || {}, on = app.settings ? app.settings.system.badges : true;
     return { shelf: on && s.active ? s.active : 0, settings: on && s.attention ? s.attention : 0 };
 }
-const TITLES = { '/results': 'Results', '/shelf': 'Shelf', '/shelf/stats': 'Stats', '/settings': 'Settings', '/admin': 'Admin panel' };
+const TITLES = { '/results': 'Results', '/shelf': 'Shelf', '/shelf/stats': 'Stats', '/settings': 'Settings', '/admin': 'Admin panel', '/pagehouse.html': 'Pagehouse Store' };
 export function drawNav(path = location.pathname) {
-    document.title = (TITLES[path] ? TITLES[path] + ' · ' : '') + 'RaveBSD';
+    document.title = path === '/' ? 'Pagehouse' : (TITLES[path] ? TITLES[path] + ' · ' : '') + 'Pagehouse';
     const b = badges();
     const top = $('#topnav'), bar = $('#tabbar');
     patchHtml(top, `<nav aria-label="Main">
-        <a class="nv lg" href="${esc(app.lastResults || '/')}" data-nav="discover" title="RaveBSD, back to Discover" aria-label="RaveBSD, back to Discover"><img src="/img/crystal-mark.png" alt=""><span class="nl">RaveBSD</span></a>
+        <a class="nv lg" href="${esc(app.lastResults || '/')}" data-nav="discover" title="Pagehouse, back to Browse" aria-label="Pagehouse, back to Browse"><span class="ph-mark" aria-hidden="true">Ph</span><span class="nl">Pagehouse</span></a>
         <span class="navsep" aria-hidden="true"></span>
         ${TABS.map(([href, label, ic]) => {
             const on = tabOn(path, href);
@@ -149,10 +149,10 @@ function notify(ev) {
     if (ev.type === 'lowSpace' && n.lowSpace) text = `Under ${app.settings.storage.lowSpaceGB} GB free on ${ev.dir}`;
     if (ev.type === 'vpn' && ev.up === false && app.settings.vpn.enabled && app.settings.vpn.tellOnDrop) text = 'The VPN tunnel dropped · downloads paused';
     if (!text || (!document.hidden && ev.type === 'done')) return;
-    const opts = { body: text, icon: '/img/crystal-mark.png', tag: ev.type + (ev.jobId || '') };
+    const opts = { body: text, icon: '/img/favicon.png', tag: ev.type + (ev.jobId || '') };
     // Phones only show notifications through the service worker; desktops can use either.
-    if (swReg) { swReg.showNotification('RaveBSD', opts).catch(() => {}); return; }
-    try { const note = new Notification('RaveBSD', opts); note.onclick = () => { focus(); go('/shelf'); note.close(); }; }
+    if (swReg) { swReg.showNotification('Pagehouse', opts).catch(() => {}); return; }
+    try { const note = new Notification('Pagehouse', opts); note.onclick = () => { focus(); go('/shelf'); note.close(); }; }
     catch (e) { /* no notifications here */ }
 }
 
@@ -163,9 +163,9 @@ export function login({ asAdmin = false } = {}) {
     showChrome(false);
     setBg('var(--glow-home)');
     const mode = app.session.mode;
-    const lede = asAdmin ? 'For the person who runs this RaveBSD.' : mode === 'family' ? 'Use the account you were given.' : 'This RaveBSD asks for a password.';
+    const lede = asAdmin ? 'For the person who runs this Pagehouse server.' : mode === 'family' ? 'Use the account you were given.' : 'This Pagehouse server asks for a password.';
     root.innerHTML = `<div class="gate">
-        <div class="lockup"><img class="a" src="/img/lockup-happy-reading.png" alt="Happy reading!"><img class="b" src="/img/lockup-book-search.png" alt="" aria-hidden="true"></div>
+        <div class="ph-lockup"><span class="ph-mark" aria-hidden="true">Ph</span><span>Pagehouse</span></div>
         <form class="gate-card" id="login">
             <h1 class="h-sec">${asAdmin ? 'Admin' : 'Sign'} <span class="serif" style="color:var(--yellow)">${asAdmin ? 'sign-in' : 'in'}</span></h1>
             <p class="lede">${lede}</p>
@@ -189,7 +189,7 @@ export function login({ asAdmin = false } = {}) {
 
 async function boot() {
     try { app.session = await api('/api/session'); }
-    catch (e) { root.innerHTML = `<div class="gate"><p class="lede">${esc(/fetch|network/i.test(e.message) ? 'RaveBSD is not answering. Is the server running?' : e.message)}</p></div>`; return; }
+    catch (e) { root.innerHTML = `<div class="gate"><p class="lede">${esc(/fetch|network/i.test(e.message) ? 'Pagehouse is not answering. Is the server running?' : e.message)}</p></div>`; return; }
     if (!app.session.signedIn) return login();
     if (!app.session.setupDone) {
         showChrome(false);

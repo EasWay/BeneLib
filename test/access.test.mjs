@@ -141,7 +141,10 @@ async function start(mode, { name = mode, env: extra = {}, seed, setup: doSetup 
     for (let i = 0; i < 50; i++) { try { if ((await fetch(base + '/health')).ok) break; } catch (e) { /* not up */ } await sleep(100); }
     const call = async (method, p, { body, cookie, headers = {} } = {}) => {
         const res = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', Origin: base, ...(cookie ? { Cookie: cookie } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' });
-        return { status: res.status, headers: res.headers, cookie: (res.headers.get('set-cookie') || '').split(';')[0], json: await res.json().catch(() => null) };
+        const text = await res.text();
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* HTML page response */ }
+        return { status: res.status, headers: res.headers, cookie: (res.headers.get('set-cookie') || '').split(';')[0], json, text };
     };
     // /events as a page opens it: ended() says whether the server closed it within a second.
     const events = async cookie => {
@@ -161,11 +164,17 @@ async function start(mode, { name = mode, env: extra = {}, seed, setup: doSetup 
 
 const ADMIN_ONLY = [
     ['POST', '/api/settings', { searching: { view: 'list' } }], ['GET', '/api/libraries'], ['POST', '/api/creds', {}], ['POST', '/api/folders', {}],
+    ['GET', '/api/store/admin/rights-policy'], ['PUT', '/api/store/admin/rights-policy', { license: 'x', rightsScope: 'y', rightsEvidence: 'z' }],
+    ['POST', '/api/store/admin/rights-policy/apply-existing', {}],
+    ['GET', '/api/store/admin/catalog/pending-rights'], ['POST', '/api/store/admin/catalog/approve', { ids: [] }],
+    ['GET', '/api/store/admin/catalog/pending-rights/eligible-ids'],
+    ['GET', '/api/store/admin/catalog/import-run'], ['POST', '/api/store/admin/catalog/import-run', { limit: 1 }],
+    ['POST', '/api/store/admin/catalog/backfill-covers', { after: '', limit: 5 }],
     ['POST', '/api/qbit/test', {}], ['POST', '/api/keys', { label: 'x' }], ['GET', '/api/backup'], ['POST', '/api/restore', {}], ['GET', '/api/stats'],
     ['POST', '/api/mode', { mode: 'private' }], ['POST', '/api/users', { username: 'x', password: 'xxxx' }], ['POST', '/browser/verify', {}],
     ['GET', '/dl/zlib?id=1&hash=a'], ['POST', '/api/slum'], ['GET', '/api/update'], ['GET', '/api/connection'],
 ];
-const OPEN = [['GET', '/api/settings'], ['GET', '/api/status'], ['GET', '/api/shelf'], ['GET', '/resolve?id=nope']];
+const OPEN = [['GET', '/api/settings'], ['GET', '/api/status'], ['GET', '/api/shelf'], ['GET', '/resolve?id=nope'], ['GET', '/api/store/source-search?q=rights']];
 
 for (const mode of ['public', 'family']) {
     const s = await start(mode, { env: mode === 'public' ? { TRUST_PROXY: '1' } : {} });
@@ -182,16 +191,56 @@ for (const mode of ['public', 'family']) {
             for (const [m, p, body] of ADMIN_ONLY) assert.equal((await s.call(m, p, { body, cookie })).status, denied, `${mode} ${role} ${m} ${p}`);
             for (const [m, p] of OPEN) {
                 const r = await s.call(m, p, { cookie });
-                if (role === 'none') assert.equal(r.status, 401, `${mode} none ${p}`);
+                if (role === 'none' && p.startsWith('/api/store/source-search')) assert.equal(r.status, 409, `${mode} none is allowed to search only after policy setup`);
+                else if (role === 'none') assert.equal(r.status, 401, `${mode} none ${p}`);
                 else assert.ok(r.status !== 401 && r.status !== 403, `${mode} ${role} ${p} -> ${r.status}`);
             }
             if (role !== 'none') {
                 const st = (await s.call('GET', '/api/settings', { cookie })).json;
                 assert.ok(!st.shelves.ebookDir && !st.qbit.url && !st.access.apiKeys, `${mode} ${role} sees no folders, addresses or keys`);
             }
+            assert.equal((await s.call('GET', '/api/store/source-search?q=rights', { cookie })).status, 409, `${mode} ${role} source searches require a complete saved rights policy`);
         }
         // Admins reach the admin routes.
         assert.equal((await s.call('GET', '/api/libraries', { cookie: s.admin })).status, 200, mode + ' admin');
+        assert.equal((await s.call('GET', '/api/store/admin/rights-policy', { cookie: s.admin })).status, 200, mode + ' admin rights policy');
+        assert.equal((await s.call('GET', '/api/store/admin/catalog/import-run', { cookie: s.admin })).status, 200, mode + ' admin reads source import status');
+        const eligible = await s.call('GET', '/api/store/admin/catalog/pending-rights/eligible-ids', { cookie: s.admin });
+        assert.equal(eligible.status, 200, mode + ' admin selects eligible books across the full pending queue');
+        assert.deepEqual(eligible.json, { ids: [], total: 0 });
+        assert.equal((await s.call('PUT', '/api/store/admin/rights-policy', { body: { license: 'CC BY 4.0', rightsScope: 'redistribution', rightsEvidence: 'Documented permission' }, cookie: s.admin })).status, 400, mode + ' rights policy requires explicit confirmation');
+        assert.equal((await s.call('PUT', '/api/store/admin/rights-policy', { body: { license: 'CC BY 4.0', rightsScope: 'redistribution', rightsEvidence: 'Documented permission', confirmUniversalRights: true }, cookie: s.admin })).status, 200, mode + ' admin confirms and saves rights policy');
+        assert.equal((await s.call('GET', '/api/store/source-search', { cookie: s.admin })).status, 400, mode + ' source search is enabled after policy confirmation and requires a query');
+        assert.equal((await s.call('POST', '/api/store/admin/rights-policy/apply-existing', { body: {}, cookie: s.admin })).status, 200, mode + ' admin applies rights policy');
+        const rootPage = await s.call('GET', '/');
+        assert.equal(rootPage.status, 200, mode + ' storefront root');
+        assert.match(rootPage.text, /<title>Pagehouse Store<\/title>/, mode + ' root serves Pagehouse storefront');
+        assert.doesNotMatch(rootPage.text, /Try another title or author\. The storefront only shows books currently listed in the approved catalogue\./, mode + ' no longer shows the outdated catalogue-only search hint');
+        assert.match(rootPage.text, /source-cover no-art/, mode + ' source books without artwork get a title cover');
+        assert.match(rootPage.text, /function paintCover\(b, rough\)/, mode + ' catalog books without artwork get generated title covers');
+        assert.doesNotMatch(rootPage.text, /rightsReview|rightsNav|Pending books/, mode + ' public storefront excludes admin controls');
+        const settingsModule = await s.call('GET', '/js/settings.js');
+        assert.match(settingsModule.text, /Store catalogue/, mode + ' admin module includes store management');
+        const adminPage = await s.call('GET', '/admin');
+        assert.equal(adminPage.status, 200, mode + ' admin app route');
+        assert.doesNotMatch(adminPage.text, /<title>Pagehouse Store<\/title>/, mode + ' admin route serves app shell');
+        const settingsPage = await s.call('GET', '/settings');
+        assert.equal(settingsPage.status, 200, mode + ' settings app route');
+        assert.doesNotMatch(settingsPage.text, /<title>Pagehouse Store<\/title>/, mode + ' settings retains app shell');
+        assert.equal((await s.call('PUT', '/api/store/admin/rights-policy', { body: { license: '', rightsScope: '', rightsEvidence: '' }, cookie: s.admin })).status, 200, mode + ' admin clears future-import policy');
+        assert.equal((await s.call('POST', '/api/store/admin/catalog/import', { body: { items: [{
+            sourceId: 'rights-test', sourceRef: 'review-1', sourceName: 'Rights test source',
+            title: 'Book awaiting review', authors: 'Test Author', license: 'CC BY 4.0',
+            rightsScope: 'redistribution', rightsEvidence: 'Documented permission', rightsStatus: 'pending',
+            cover_url: 'https://covers.example.org/review.jpg',
+        }] }, cookie: s.admin })).status, 200, mode + ' admin imports review book');
+        const pending = await s.call('GET', '/api/store/admin/catalog/pending-rights', { cookie: s.admin });
+        assert.equal(pending.status, 200, mode + ' admin reads pending queue');
+        const reviewId = pending.json.items.find(item => item.title === 'Book awaiting review').id;
+        assert.equal((await s.call('POST', '/api/store/admin/catalog/approve', { body: { ids: [reviewId] }, cookie: s.admin })).status, 200, mode + ' admin approves selected book');
+        const publishedReview = await s.call('GET', '/api/store/catalog?q=awaiting%20review', { cookie: s.admin });
+        assert.equal(publishedReview.json.total, 1, mode + ' approved book is public');
+        assert.equal(publishedReview.json.items[0].coverUrl, `/api/store/catalog/${reviewId}/cover`, mode + ' imported cover is retained on publication');
         assert.ok((await s.call('GET', '/api/settings', { cookie: s.admin })).json.shelves.ebookDir, mode + ' admin sees folders');
         // A settings patch cannot reopen setup (which would make everyone the admin).
         await s.call('POST', '/api/settings', { body: { setupDone: false }, cookie: s.admin });

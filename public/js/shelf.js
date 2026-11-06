@@ -33,12 +33,12 @@ const canDelete = r => isAdmin() || visitor() || !!(r.addedBy && r.addedBy.name 
 function frame(tab, inner) {
     const auto = app.settings.saving.auto && app.settings.saving.allow;
     return `<main class="page"><section class="shelf-top">
-        <header class="ptitle">${isPhone() ? '<img src="/img/crystal-mark.png" alt="RaveBSD">' : ''}<h1 class="h-page">Your <span class="serif" style="color:#2EE6F6">shelf</span></h1></header>
+        <header class="ptitle">${isPhone() ? '<span class="ph-mark" aria-hidden="true">Ph</span>' : ''}<h1 class="h-page">Your <span class="serif" style="color:var(--brass)">shelf</span></h1></header>
         ${isAdmin() ? `<nav class="seg" aria-label="Shelf views"><a href="/shelf"${tab === 'books' ? ' aria-current="page"' : ''}>Books</a><a href="/shelf/stats"${tab === 'stats' ? ' aria-current="page"' : ''}>Stats</a></nav>` : ''}
         ${tab === 'books' && !isPhone() ? `<ol class="how" aria-label="How it works">
             <li class="step"><i style="background:#FFD54A">1</i>Downloaded to the server</li><li class="sep" aria-hidden="true">›</li>
-            <li class="step"><i style="background:#FF9FE8">2</i>Renamed and filed for you</li><li class="sep" aria-hidden="true">›</li>
-            <li class="step"><i style="background:#5EEAB4">3</i>Saved to this device${auto ? ', by itself for eBooks' : ''}</li></ol>` : ''}
+            <li class="step"><i style="background:var(--brass)">2</i>Renamed and filed for you</li><li class="sep" aria-hidden="true">›</li>
+            <li class="step"><i style="background:var(--accent)">3</i>Saved to this device${auto ? ', by itself for eBooks' : ''}</li></ol>` : ''}
         ${inner}</main>`;
 }
 
@@ -252,7 +252,7 @@ async function renderStats() {
     let s;
     try { s = await api('/api/stats?period=' + statsPeriod); } catch (e) { root.innerHTML = frame('stats', `<p class="err">${esc(e.message)}</p></section>`); return; }
     const intro = `<p class="lede">Counted on this server and never sent anywhere. It shows what you read most and what it costs in disk space. You can switch counting off in the <a href="/admin#privacy" class="u" style="font-size:inherit;color:inherit">admin panel, under Privacy and backup</a>.</p>`;
-    if (!s.enabled) { root.innerHTML = frame('stats', intro + `</section><div class="empty"><b>Counting is off</b><span>Switch on Keep stats in the admin panel, under Privacy and backup, and RaveBSD starts counting from the next download.</span><a class="btn yellow sm" href="/admin#privacy">Privacy settings</a></div>`); return; }
+    if (!s.enabled) { root.innerHTML = frame('stats', intro + `</section><div class="empty"><b>Counting is off</b><span>Switch on Keep stats in the admin panel, under Privacy and backup, and Pagehouse starts counting from the next download.</span><a class="btn yellow sm" href="/admin#privacy">Privacy settings</a></div>`); return; }
     const periods = [['all', 'All time'], ['year', 'This year'], ['30d', 'Last 30 days']];
     root.innerHTML = frame('stats', intro + `</section><section aria-label="Stats" class="sset" style="gap:22px">
         <div class="seg" role="radiogroup" aria-label="Period">${periods.map(([v, l]) => `<button type="button" role="radio" aria-checked="${v === statsPeriod}" data-act="period" data-v="${v}">${l}</button>`).join('')}</div>

@@ -96,6 +96,26 @@ If `id -u` or `id -g` is not 1000, set `PUID` and `PGID` in `.env` before starti
 
 **qBittorrent and Gluetun** are ready to go in `compose.yaml`: uncomment them and follow the notes there. If you edit `compose.yaml`, `./update.sh` cannot update it when a new version changes it too (it says so and updates the image only). Compose also reads a `compose.override.yaml` next to it, so your own changes can live there instead.
 
+## Pagehouse store and catalog
+
+The Pagehouse storefront is served at `/` and `/pagehouse.html`. Its catalog database defaults to `data/pagehouse.sqlite`, and private product files default to `data/pagehouse-files/` (override with `PAGEHOUSE_DB_PATH` and `PAGEHOUSE_FILES_DIR`). Catalog imports use `POST /api/store/admin/catalog/import`; public full-text search is `GET /api/store/catalog?q=...`. That import endpoint upserts submitted items; it does not crawl sources. Include a result's `coverUrl` (or `cover_url`) to retain its cover, or use its cached result `id` for cover recovery.
+
+Storefront searches query the approved catalog and the configured e-book sources. Source searches are disabled until an admin saves and confirms a complete universal license, rights scope, and evidence policy (`GET`/`PUT /api/store/admin/rights-policy`). The confirmation is an admin attestation, not independent legal verification by Pagehouse; it also allows regular imports with that policy to be auto-approved. Existing policies are migrated as unconfirmed, so admins must review and confirm them before source search or policy-based approval is enabled. Nightly review imports are always pending and do not inherit policy approval.
+
+In `/admin` under **Store catalogue**, admins can apply missing policy fields to existing records (`POST /api/store/admin/rights-policy/apply-existing`), review the paginated pending queue (`GET /api/store/admin/catalog/pending-rights`), and select eligible pending books across all pages (`GET /api/store/admin/catalog/pending-rights/eligible-ids`). Approval (`POST /api/store/admin/catalog/approve`) requires complete rights details and explicit confirmation that evidence supports publication. Records without complete rights evidence cannot be approved. Rejected records remain rejected on later imports. Approval makes listed metadata visible, but does not make an unavailable book file ready for purchase.
+
+The admin panel also backfills missing published-book covers from exact title-and-author matches in Open Library; existing covers and publication status are preserved. Source/catalog covers use the backend's public-URL-checked image proxy. Books without cover art receive generated title covers. The [Pagehouse architecture reference](./Pagehouse-System-Architecture-Revised.html) and [78-book OpenStax CC BY metadata payload](./pagehouse-openstax-batch.json) are included for reference and manual import.
+
+Admins can manually trigger a broad, rotating search of enabled e-book sources in **Store catalogue**. Each run imports at most 5,000 distinct results in batches, with new records left pending rights review. Five thousand is a ceiling, not a guaranteed count; results depend on source availability. Start and inspect runs through `POST`/`GET /api/store/admin/catalog/import-run`. To schedule it nightly at midnight (system local time), add a cron entry from the repository directory:
+
+```
+0 0 * * * cd /path/to/RaveBSD && PAGEHOUSE_IMPORT_URL=http://127.0.0.1:8080 node scripts/pagehouse-import.mjs
+```
+
+The script waits for the server-side run to finish and reports partial source failures. If the server requires admin sign-in, create an owner-only credential file (mode `600`) with `PAGEHOUSE_ADMIN_USERNAME=...` and `PAGEHOUSE_ADMIN_PASSWORD=...`, then add `PAGEHOUSE_IMPORT_ENV_FILE=/absolute/path/to/credentials` to the cron command. Do not put passwords directly in crontab. The manual trigger uses the same server-side run and can be used without cron.
+
+Checkout is server-priced from catalog records and requires a Paystack secret configured only on the server (`PAYSTACK_SECRET_KEY`). The `POST /api/store/checkout` payload must include a unique, client-generated `idempotencyKey` and email, plus the selected catalog IDs; reusing the same key/cart returns the existing checkout session. Set the Paystack webhook URL to `https://<your-domain>/webhooks/paystack`; successful events are signature-checked and verified against Paystack's transaction API before an order is marked paid. Buyer download links are signed, expire after 24 hours, and allow at most five uses per item. Use Paystack test credentials during development. Transactional email delivery and book requests are not connected.
+
 ## Update
 
 ```

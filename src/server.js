@@ -1,4 +1,5 @@
-// Node entry point. Serves public/ (one page app), the search routes from sources.js, and the app API.
+// Node entry point. Serves the Pagehouse storefront at /, the app pages under their existing routes,
+// the search routes from sources.js, and the app API.
 //
 //   /health                     Docker healthcheck (always open)
 //   /api/session, /api/login, /api/logout, /api/setup   who is signed in, first-run setup
@@ -30,6 +31,9 @@ import { vpn, checkVpn, switchExit, vpnBlocks, onVpnChange } from './vpn.js';
 import { zipFolder, zipSize } from './zip.js';
 import { refreshSlum, slumSummary } from './slum.js';
 import { fetchPublic, readCapped } from './netguard.js';
+import * as pagehouse from './pagehouse.js';
+import { getCatalogImportStatus, startCatalogImport } from './pagehouse-import.js';
+import * as pagehousePayments from './pagehouse-payments.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const RENAME_JS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'rename.js');
@@ -139,6 +143,10 @@ const OPEN = [
     [/^\/api\/(settings|status)$/, 'GET'], [/^\/api\/downloads$/, 'POST'], [/^\/api\/jobs\/[a-f0-9]+$/, 'DELETE'],
     [/^\/api\/jobs\/[a-f0-9]+\/retry$/, 'POST'], [/^\/api\/shelf$/, 'GET'], [/^\/api\/shelf\/delete$/, 'POST'],
     [/^\/api\/shelf\/[a-f0-9]+\/forget$/, 'POST'], [/^\/api\/me\/password$/, 'POST'], [/^\/api\/logout$/, 'POST'],
+    [/^\/api\/store\/catalog$/, 'GET'], [/^\/api\/store\/catalog\/[a-f0-9]{32}$/, 'GET'],
+    [/^\/api\/store\/source-search$/, 'GET'],
+    [/^\/api\/store\/checkout$/, 'POST'], [/^\/api\/store\/orders\/PH-[a-f0-9]{36}$/, 'GET'],
+    [/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/, 'POST'], [/^\/api\/store\/download\/[A-Za-z0-9_.-]+$/, 'GET'],
     [/^\/events$/, 'GET'], [/^\/files\/[a-f0-9]+$/, 'GET'], [/^\/cover$/, 'GET'],
     [/^\/search\/[a-z]+$/, 'GET'], [/^\/resolve$/, 'GET'], [/^\/torrent$/, 'GET'],
 ];
@@ -149,6 +157,7 @@ const SETUP_OPEN = [[/^\/api\/settings$/, 'GET'], [/^\/api\/folders$/, 'POST'], 
 const API_CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-API-Key', 'Access-Control-Allow-Methods': 'GET, OPTIONS' };
 
 function serveStatic(urlPath, res, req) {
+    if (urlPath === '/') return sendFile(path.join(ROOT, 'pagehouse.html'), res, req);
     if (urlPath === '/js/rename.js') return sendFile(RENAME_JS, res, req);
     let rel = decodeURIComponent(urlPath).replace(/^\/+/, '');
     // Page routes (/shelf, /settings, ...) all load the one page; it reads the address itself.
@@ -272,6 +281,138 @@ function viewItem(i, me) {
 async function api(req, res, url, me) {
     const p = url.pathname, m = req.method;
     let mm;
+
+    if (p === '/api/store/source-search' && m === 'GET') {
+        const policy = pagehouse.getRightsPolicy();
+        if (!policy.adminConfirmed || !policy.license || !policy.rightsScope || !policy.rightsEvidence) {
+            return fail(res, 'Configure and confirm a complete universal license, rights scope, and evidence in Admin → Store catalogue before searching external sources.', 409);
+        }
+        const query = (url.searchParams.get('q') || '').trim();
+        if (!query || query.length > 200) return fail(res, 'q must contain between 1 and 200 characters');
+        const searchUrl = new URL('http://localhost/search/all');
+        searchUrl.searchParams.set('mode', 'ebooks');
+        searchUrl.searchParams.set('q', query);
+        const response = await core.fetch(new Request(searchUrl), {}, {
+            waitUntil: promise => promise.catch(() => {}),
+            passThroughOnException() {},
+        });
+        const result = await response.json();
+        if (!response.ok) return fail(res, result.error || `Search returned HTTP ${response.status}`, response.status);
+        if (!Array.isArray(result.results)) return fail(res, 'Search returned an invalid result list', 502);
+        return send(res, 200, { results: result.results }, { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/store/catalog' && m === 'GET') {
+        const subjects = (url.searchParams.get('subjects') || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 30);
+        const result = pagehouse.searchCatalog({ q: url.searchParams.get('q') || '', subjects, limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset') });
+        return send(res, 200, result, { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=120' });
+    }
+    if ((mm = p.match(/^\/api\/store\/catalog\/([a-f0-9]{32})\/cover$/)) && m === 'GET') {
+        return sendCatalogCover(res, mm[1]);
+    }
+    if ((mm = p.match(/^\/api\/store\/catalog\/([a-f0-9]{32})$/)) && m === 'GET') {
+        const book = pagehouse.getBook(mm[1]);
+        return book ? send(res, 200, book, { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300' }) : send(res, 404, { error: 'Book not found' });
+    }
+    if (p === '/api/store/admin/catalog/import' && m === 'POST') {
+        try {
+            const b = await json(req, 2e6);
+            const items = Array.isArray(b.items) ? b.items.map(item => {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+                const cached = typeof item.id === 'string' ? getResult(item.id) : null;
+                const coverUrl = [item.coverUrl, item.cover_url, item.cover, item.thumbnail, cached?.coverUrl]
+                    .find(value => typeof value === 'string' && value.trim()) || '';
+                return coverUrl ? { ...item, coverUrl } : item;
+            }) : b.items;
+            return send(res, 200, pagehouse.importBooks(items));
+        } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/catalog/import-run' && m === 'POST') {
+        try {
+            const b = await json(req);
+            const started = startCatalogImport({
+                limit: b.limit ?? 5000,
+                disabledSources: settings.sources.off,
+                importBatch: items => pagehouse.importBooks(items, { reviewOnly: true }),
+                search: async (source, query) => {
+                    const searchUrl = new URL(`http://localhost/search/${source}`);
+                    searchUrl.searchParams.set('mode', 'ebooks');
+                    searchUrl.searchParams.set('q', query);
+                    const response = await core.fetch(new Request(searchUrl), {}, {
+                        waitUntil: promise => promise.catch(() => {}),
+                        passThroughOnException() {},
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || `Search returned HTTP ${response.status}`);
+                    if (!Array.isArray(result.results)) throw new Error('Search returned an invalid result list');
+                    return result.results;
+                },
+            });
+            return send(res, 202, started, { 'Cache-Control': 'no-store' });
+        } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/catalog/import-run' && m === 'GET') {
+        return send(res, 200, getCatalogImportStatus(), { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/store/admin/catalog/backfill-covers' && m === 'POST') {
+        try {
+            const b = await json(req);
+            return send(res, 200, await pagehouse.backfillCatalogCovers({ after: b.after, limit: b.limit }));
+        } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/rights-policy' && m === 'GET') return send(res, 200, pagehouse.getRightsPolicy(), { 'Cache-Control': 'no-store' });
+    if (p === '/api/store/admin/rights-policy' && m === 'PUT') {
+        try {
+            const input = await json(req);
+            if ([input.license, input.rightsScope, input.rightsEvidence].some(value => String(value ?? '').trim())
+                && input.confirmUniversalRights !== true) {
+                throw new Error('Confirm that the license, rights scope, and evidence apply to all future imports');
+            }
+            return send(res, 200, pagehouse.saveRightsPolicy(input));
+        }
+        catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/rights-policy/apply-existing' && m === 'POST') {
+        try { return send(res, 200, pagehouse.applyRightsPolicyToExisting()); }
+        catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/catalog/pending-rights' && m === 'GET') {
+        return send(res, 200, pagehouse.pendingRightsBooks({ limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset') }), { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/store/admin/catalog/pending-rights/eligible-ids' && m === 'GET') {
+        return send(res, 200, pagehouse.pendingRightsBookIds(), { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/store/admin/catalog/approve' && m === 'POST') {
+        try {
+            const b = await json(req);
+            return send(res, 200, pagehouse.approvePendingBooks(b.ids));
+        } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/catalog/stats' && m === 'GET') return send(res, 200, pagehouse.catalogStats());
+    if (p === '/api/store/checkout' && m === 'POST') {
+        try { return send(res, 201, await pagehousePayments.createCheckout(await json(req))); }
+        catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
+    if ((mm = p.match(/^\/api\/store\/orders\/(PH-[a-f0-9]{36})$/)) && m === 'GET') {
+        const order = pagehousePayments.getOrderForBuyer(mm[1], url.searchParams.get('email') || '');
+        return order ? send(res, 200, order, { 'Cache-Control': 'no-store' }) : send(res, 404, { error: 'Order not found' });
+    }
+    if ((mm = p.match(/^\/api\/store\/orders\/(PH-[a-f0-9]{36})\/verify$/)) && m === 'POST') {
+        try {
+            const b = await json(req);
+            if (!pagehousePayments.getOrderForBuyer(mm[1], b.email || '')) return send(res, 404, { error: 'Order not found' });
+            return send(res, 200, await pagehousePayments.verifyCheckout(mm[1]));
+        } catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
+    if ((mm = p.match(/^\/api\/store\/download\/([A-Za-z0-9_.-]+)$/)) && m === 'GET') {
+        const f = pagehousePayments.consumeDownloadToken(mm[1]);
+        if (!f) return send(res, 404, { error: 'Download link is invalid, expired or already used' });
+        let size; try { size = fs.statSync(f.path).size; } catch { return send(res, 404, { error: 'File not found' }); }
+        const filename = f.filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+        res.writeHead(200, { 'Content-Type': f.contentType, 'Content-Length': size, 'Cache-Control': 'no-store',
+            'Content-Disposition': `attachment; filename="${filename}"`, ...SECURITY });
+        pipeline(fs.createReadStream(f.path), res, () => {});
+        return;
+    }
 
     if (p === '/api/settings') {
         if (m === 'POST') {
@@ -485,13 +626,23 @@ async function sendCover(res, url, me) {
     const item = sid && jobs.getItem(sid);
     if (item && !jobs.canSee(me, item)) { res.writeHead(404).end(); return; }
     const src = sid ? (item || {}).coverUrl : (getResult(id) || {}).coverUrl;
+    return sendCoverSource(res, src);
+}
+async function sendCatalogCover(res, id) {
+    return sendCoverSource(res, pagehouse.getCatalogCoverSource(id));
+}
+async function sendCoverSource(res, src) {
     if (!src || !/^https?:\/\//i.test(src)) { res.writeHead(404).end(); return; }
+    let sourceHost = '';
+    try { sourceHost = new URL(src).hostname.toLowerCase(); } catch { res.writeHead(404).end(); return; }
     let hit = covers.get(src);
     if (!hit) {
         try {
             const r = await fetchPublic(src, { headers: { 'User-Agent': currentUA(), Accept: 'image/*' }, signal: AbortSignal.timeout(8000) });
             const type = r.headers.get('content-type') || '';
-            if (!r.ok || !/^image\/(jpeg|png|webp|gif|avif)/.test(type)) { if (r.body) r.body.cancel().catch(() => {}); throw new Error('not an image'); }
+            const svg = sourceHost === 'assets.openstax.org' && new URL(r.url).hostname.toLowerCase() === sourceHost
+                && /^image\/svg\+xml(?:;|$)/i.test(type);
+            if (!r.ok || (!/^image\/(jpeg|png|webp|gif|avif)(?:;|$)/i.test(type) && !svg)) { if (r.body) r.body.cancel().catch(() => {}); throw new Error('not an image'); }
             hit = { type, buf: await readCapped(r, 3e6) };
         } catch (e) { hit = { missing: true }; }
         covers.set(src, hit);
@@ -504,7 +655,9 @@ async function sendCover(res, url, me) {
     }
     // Kept by the browser too, so a redrawn list does not ask again for covers that are not there.
     if (hit.missing) { res.writeHead(404, { 'Cache-Control': 'private, max-age=3600' }).end(); return; }
-    res.writeHead(200, { 'Content-Type': hit.type, 'Cache-Control': 'private, max-age=3600', ...SECURITY }).end(hit.buf);
+    const svgSecurity = /^image\/svg\+xml(?:;|$)/i.test(hit.type)
+        ? { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {};
+    res.writeHead(200, { 'Content-Type': hit.type, 'Cache-Control': 'private, max-age=3600', ...SECURITY, ...svgSecurity }).end(hit.buf);
 }
 
 // Sends a shelf item to the device: the file itself, or a zip for an audiobook folder.
@@ -556,6 +709,12 @@ const server = http.createServer(async (req, res) => {
     const p = url.pathname;
     try {
         if (p === '/health') { res.writeHead(200).end('ok'); return; }
+        if (p === '/webhooks/paystack' && req.method === 'POST') {
+            try {
+                const raw = await body(req, 1e6);
+                return send(res, 200, await pagehousePayments.handlePaystackWebhook(raw, req.headers['x-paystack-signature']));
+            } catch (e) { return fail(res, e, e.statusCode || 500); }
+        }
         if (crossSite(req)) return fail(res, 'Requests from other sites are not allowed', 403);
 
         const me = auth.who(req);
@@ -613,11 +772,14 @@ const server = http.createServer(async (req, res) => {
             if (auth.apiNeedsKey() && !me.user && !auth.apiKeyOk(req)) return send(res, 401, { error: 'Missing or invalid X-API-Key' }, API_CORS);
         }
         if (isStaticPage(p, req)) { serveStatic(p, res, req); return; }
-        if (!p.startsWith('/api/v1/') && me.role === 'none') return fail(res, 'Sign in first', 401);
+        const publicStoreRoute = /^\/api\/store\/(catalog(?:\/[a-f0-9]{32}(?:\/cover)?)?|source-search|checkout|orders\/PH-[a-f0-9]{36}(?:\/verify)?|download\/[A-Za-z0-9_.-]+)$/.test(p);
+        if (!p.startsWith('/api/v1/') && me.role === 'none' && !publicStoreRoute) return fail(res, 'Sign in first', 401);
         if (me.role !== 'admin' && !p.startsWith('/api/v1/') && !OPEN.some(([re, meth]) => re.test(p) && (!meth || meth === req.method))) return fail(res, 'Only an admin can do that', 403);
 
         // Visitors share the server's libraries and its address's standing with them: 30 searches per 5 minutes each.
-        if (me.role === 'visitor' && p.startsWith('/search/') && limited(`s|${me.ip}`, 30, 300e3)) return fail(res, 'That is a lot of searching. Wait a few minutes.', 429);
+        if (me.role === 'visitor' && (p.startsWith('/search/') || p === '/api/store/source-search') && limited(`s|${me.ip}`, 30, 300e3)) return fail(res, 'That is a lot of searching. Wait a few minutes.', 429);
+        if (p === '/api/store/checkout' && limited(`pagehouse-checkout|${ipOf(req)}`, 5, 300e3)) return fail(res, 'Too many checkout attempts. Wait a few minutes.', 429);
+        if (/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/.test(p) && limited(`pagehouse-verify|${ipOf(req)}`, 10, 300e3)) return fail(res, 'Too many payment verification attempts. Wait a few minutes.', 429);
         // Links, covers and torrent files are fetched from other websites too. A results page asks for one link and
         // one cover per result (at most 80 covers ahead), so these sit far above what browsing results needs.
         if (me.role === 'visitor' && VISITOR_FETCHES.has(p) && limited(`${p}|${me.ip}`, VISITOR_FETCHES.get(p), 300e3)) return fail(res, 'That is a lot of requests. Wait a few minutes.', 429);

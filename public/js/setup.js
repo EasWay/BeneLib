@@ -3,7 +3,7 @@ import { $, $$, esc, api, icon, anim, chevron, prefs, priv, privPath, size } fro
 import { setBg } from './app.js';
 import { applyTemplate } from './rename.js';
 
-const COLOURS = ['#FF8A65', '#5EEAB4', '#2EE6F6', '#FF4FD8'];
+const COLOURS = ['#e8c48a', '#1e4a38', '#597568', '#8e6a35'];
 const HEIGHTS = [40, 50, 44, 56];
 let st, root, done;
 
@@ -42,7 +42,7 @@ function checkFolders() {
 function stepHtml() {
     const s = st;
     if (s.step === 1) return `<div class="sstep" data-step>
-        <div><h1>Who is it <span class="serif" style="color:#FFD54A">for?</span></h1>
+        <div><h1>Who is it <span class="serif" style="color:var(--brass)">for?</span></h1>
         <p class="lede" style="margin-top:8px">You can change this later in the admin panel, under Access.</p></div>
         <div role="radiogroup" aria-label="Who it is for" style="display:flex;flex-direction:column;gap:20px">
         ${s.forced ? '' : `<button type="button" class="opt" role="radio" aria-checked="${s.auth === 'none'}" data-act="auth" data-v="none"><b>Just me, no password</b><span>Anyone who can reach this address can use everything. Fine at home, on Tailscale, or behind a proxy that already asks.</span></button>
@@ -55,7 +55,7 @@ function stepHtml() {
             <label class="field">Once more<input class="input" type="password" data-k="password2" value="${esc(s.password2)}" autocomplete="new-password"></label></div>` : ''}
         </div>`;
     if (s.step === 2) return `<div class="sstep" data-step>
-        <div><h1>Where do books <span class="serif" style="color:#5EEAB4">live?</span></h1>
+        <div><h1>Where do books <span class="serif" style="color:var(--accent)">live?</span></h1>
         <p class="lede" style="margin-top:8px">Finished downloads are renamed your way and put on these shelves. Map real folders into the container in <span class="mono" style="font-size:15px;color:var(--paper)">compose.yaml</span>.</p></div>
         <div class="fields"><label class="field">eBooks<input class="input mono priv" data-k="ebookDir" value="${esc(s.ebookDir)}" spellcheck="false"></label>
             <label class="field">Audiobooks<input class="input mono priv" data-k="audioDir" value="${esc(s.audioDir)}" spellcheck="false"></label></div>
@@ -75,23 +75,23 @@ function stepHtml() {
             failed: ['Could not reach it', s.qbError || 'Enter its address and login below', 'Test again', ''],
         }[t];
         return `<div class="sstep" data-step>
-        <div><h1>Got <span class="serif" style="color:#2EE6F6">qBittorrent?</span></h1>
-        <p class="lede" style="margin-top:8px">Optional. eBooks download on their own. Audiobooks usually come as magnet links, and qBittorrent can fetch those. RaveBSD will rename and shelve what it brings back.</p></div>
+        <div><h1>Got <span class="serif" style="color:var(--accent)">qBittorrent?</span></h1>
+        <p class="lede" style="margin-top:8px">Optional. eBooks download on their own. Audiobooks usually come as magnet links, and qBittorrent can fetch those. Pagehouse will rename and shelve what it brings back.</p></div>
         <button type="button" class="bigswitch" role="switch" aria-checked="${s.qb}" data-act="qb">Yes, connect qBittorrent<span class="switch" aria-checked="${s.qb}" aria-hidden="true"></span></button>
         ${s.qb ? `<div class="reveal" style="display:flex;flex-direction:column;gap:16px">
-            <div class="qbstat" id="qbstat"><span class="qt"><b style="${t === 'found' ? 'color:#5EEAB4' : t === 'failed' ? 'color:#FF8A65' : ''}" aria-live="polite">${esc(view[0])}</b><span>${esc(view[1])}</span></span>
+            <div class="qbstat" id="qbstat"><span class="qt"><b style="${t === 'found' ? 'color:var(--accent)' : t === 'failed' ? 'color:var(--red)' : ''}" aria-live="polite">${esc(view[0])}</b><span>${esc(view[1])}</span></span>
             <button type="button" class="btn cyan" data-act="qbtest" ${view[3]}>${view[2]}</button></div>
             <button type="button" class="disclose" data-act="qbmanual" aria-expanded="${manual}">${manual ? 'Hide address and login' : 'Somewhere else, or needs a login?'}${chevron(16)}</button>
             ${manual ? `<div class="reveal" style="display:flex;flex-direction:column;gap:16px">
                 <label class="field">Web UI address<input class="input mono" data-k="qbUrl" value="${esc(s.qbUrl)}" spellcheck="false"></label>
                 <div class="fields"><label class="field">Username<input class="input" data-k="qbUser" value="${esc(s.qbUser)}" autocomplete="off"></label>
                 <label class="field">Password<input class="input" type="password" data-k="qbPass" value="${esc(s.qbPass)}" autocomplete="off"></label></div></div>` : ''}
-            <p class="desc" style="margin:0;font-size:14px;line-height:1.55">RaveBSD has to see qBittorrent's finished files to rename them, so share the downloads folder between both containers, for example <span class="mono" style="font-size:13px;color:var(--paper)">/srv/downloads:/downloads</span>.</p>
+            <p class="desc" style="margin:0;font-size:14px;line-height:1.55">Pagehouse has to see qBittorrent's finished files to rename them, so share the downloads folder between both containers, for example <span class="mono" style="font-size:13px;color:var(--paper)">/srv/downloads:/downloads</span>.</p>
         </div>` : ''}
         </div>`;
     }
     return `<div class="sstep" data-step>
-        <div><h1>Shelves <span class="serif" style="color:#FF9FE8">built.</span></h1>
+        <div><h1>Shelves <span class="serif" style="color:var(--brass)">built.</span></h1>
         <p class="lede" style="margin-top:8px">What you search for is never saved. Settings and logins stay in the data folder on this machine and go nowhere else.</p></div>
         <div class="tiles" data-tiles>
             <div><span>Access</span><b>${s.auth === 'public' ? 'Public, admin ' + esc(s.username || 'admin') : s.auth === 'family' ? 'Friends and family, admin ' + esc(s.username || 'admin') : s.auth === 'pw' ? 'Just me, user ' + esc(s.username || 'admin') : 'Just me, no password'}</b></div>
@@ -106,7 +106,7 @@ function stepHtml() {
 function draw(first) {
     const s = st;
     root.innerHTML = `<div class="setup">
-        <div class="lockup"><img class="a" src="/img/lockup-happy-reading.png" alt="Happy reading!"><img class="b" src="/img/lockup-book-search.png" alt="" aria-hidden="true"></div>
+        <div class="ph-lockup"><span class="ph-mark" aria-hidden="true">Ph</span><span>Pagehouse</span></div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
             <div class="sbars" aria-hidden="true">${COLOURS.map((c, i) => `<span data-bar="${i + 1}" style="height:${HEIGHTS[i]}px;${s.step > i ? 'background:' + c : ''}"></span>`).join('')}</div>
             <span class="label" style="font-size:13px;color:var(--text2)">First run · step ${s.step} of 4</span></div>

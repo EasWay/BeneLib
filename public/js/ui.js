@@ -118,31 +118,31 @@ export function icon(name, size = 22, width = 2.2, extra = '') {
 // ── Covers and colours ───────────────────────────────────────────────────────
 // Palettes from the design: three gradient stops (light to dark), the circle and the ink of a generated cover.
 export const PALETTES = [
-    { c: ['#FFC070', '#E2552E', '#7A1F3D'], circle: '#2B0F3F', ink: '#FFF3DC' },
-    { c: ['#6FB3C4', '#2F6F88', '#0B1C2B'], circle: '#FF8A65', ink: '#FFE6D8' },
-    { c: ['#3F6FB0', '#FFE6A0', '#0F1F36'], circle: '#FFE6A0', ink: '#FFE6A0' },
-    { c: ['#9BF0D2', '#FFD54A', '#1E8E6A'], circle: '#FFD54A', ink: '#0B3A2A' },
-    { c: ['#2E7A5E', '#FFE6A0', '#0F2A20'], circle: '#FFE6A0', ink: '#FFE6A0' },
-    { c: ['#4B63FF', '#8FD0FF', '#1B1A6B'], circle: '#8FD0FF', ink: '#FBF8FF' },
-    { c: ['#8A2F40', '#FFE6A0', '#2B0F14'], circle: '#FFE6A0', ink: '#FFE6A0' },
-    { c: ['#8A55C8', '#FFD54A', '#3E1A66'], circle: '#FFD54A', ink: '#FBF8FF' },
-    { c: ['#FFC070', '#FF8A65', '#B04A2E'], circle: '#14123A', ink: '#14123A' },
-    { c: ['#A8F0FF', '#3C7FC4', '#0B2A4A'], circle: '#FFFFFF', ink: '#0B2A4A' },
-    { c: ['#FFB4C8', '#FF4FD8', '#7A2A5A'], circle: '#FFFFFF', ink: '#4A1038' },
-    { c: ['#5EEAB4', '#2EE6F6', '#0B3A2A'], circle: '#FFFFFF', ink: '#0B3A2A' },
-    { c: ['#9B5FD8', '#FF8A65', '#2E1250'], circle: '#FFD54A', ink: '#FFE6D8' },
-    { c: ['#B7A4FF', '#4B2FB0', '#1B1A6B'], circle: '#FFE6A0', ink: '#FBF8FF' },
+    { c: ['#d6ba8e', '#8e6a35', '#3a2418'], circle: '#e8c48a', ink: '#eeeae2' },
+    { c: ['#8ea89a', '#597568', '#1d3028'], circle: '#d5a58b', ink: '#eeeae2' },
+    { c: ['#b18f58', '#6e4a2d', '#2a2018'], circle: '#e8c48a', ink: '#eeeae2' },
+    { c: ['#a8c0b2', '#1e4a38', '#0d241a'], circle: '#e8c48a', ink: '#eeeae2' },
+    { c: ['#9a5b2c', '#6e2a1c', '#2a1812'], circle: '#eadfcc', ink: '#eeeae2' },
+    { c: ['#a7b0aa', '#38463f', '#14201a'], circle: '#d6ba8e', ink: '#eeeae2' },
+    { c: ['#b97962', '#6e2a1c', '#30130f'], circle: '#e8c48a', ink: '#eeeae2' },
+    { c: ['#987b86', '#4e3360', '#211827'], circle: '#e8c48a', ink: '#eeeae2' },
+    { c: ['#eadfcc', '#b18f58', '#6e4a2d'], circle: '#14201a', ink: '#14201a' },
+    { c: ['#c5d3c8', '#597568', '#263b31'], circle: '#ffffff', ink: '#14201a' },
+    { c: ['#d5a58b', '#a76e52', '#512d22'], circle: '#ffffff', ink: '#14201a' },
+    { c: ['#a8c0b2', '#1e4a38', '#0d241a'], circle: '#ffffff', ink: '#14201a' },
+    { c: ['#d6ba8e', '#8e6a35', '#3a2418'], circle: '#e8c48a', ink: '#eeeae2' },
+    { c: ['#87958a', '#38463f', '#14201a'], circle: '#eadfcc', ink: '#eeeae2' },
 ];
 // Spine colours: solid pastels with ink text, or the palette's own gradient with its ink.
-const SPINES = [['#FF8A65', '#14123A'], ['#B7A4FF', '#14123A'], ['#5EEAB4', '#14123A'], ['#FFD54A', '#14123A'], ['#4B63FF', '#FBF8FF'], ['#FF4FD8', '#14123A'], ['#FFC070', '#14123A'], ['#A8F0FF', '#14123A'], ['#FFB4C8', '#14123A'], ['#8FD0FF', '#14123A']];
+const SPINES = [['#d5a58b', '#14201a'], ['#87958a', '#14201a'], ['#a8c0b2', '#14201a'], ['#e8c48a', '#14201a'], ['#1e4a38', '#eeeae2'], ['#987b86', '#14201a'], ['#d6ba8e', '#14201a'], ['#bfd2c5', '#14201a'], ['#eadfcc', '#14201a'], ['#8ea89a', '#14201a']];
 export function hash(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 export const bookKey = r => String(r.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 export function paletteFor(r) { return PALETTES[hash(bookKey(r)) % PALETTES.length]; }
 export function spineFor(r) {
     const h = hash(bookKey(r) + '|s');
-    if (h % 3 === 0) { const p = paletteFor(r); return { bg: `linear-gradient(180deg,${p.c[1]},${p.c[2]})`, ink: p.ink, dark: true }; }
+    if (h % 3 === 0) { const p = paletteFor(r); return { bg: `linear-gradient(180deg,${p.c[1]},${p.c[2]})`, ink: p.ink, dark: p.ink !== '#14201a' }; }
     const [bg, ink] = SPINES[h % SPINES.length];
-    return { bg, ink, dark: ink !== '#14123A' };
+    return { bg, ink, dark: ink !== '#14201a' };
 }
 const rgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 export const rgba = (h, a) => { const c = rgb(h); return `rgba(${c[0]},${c[1]},${c[2]},${a})`; };

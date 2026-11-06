@@ -1,35 +1,49 @@
-/* RaveBSD "Reading room" styles. Values come from the design handoff (05-design-system.md).
-   Phone layout below 900px. html[data-still] means Settings > This browser > Animations is off. */
+/* Pagehouse application theme. Phone layout below 900px. */
 :root {
-    --base: #0E0C10;
-    --paper: #FBF8FF;
-    --ink: #14123A;
-    --text: #FBF8FF;
-    --text2: #C9C5F2;
-    --muted: #D8D3CC;
-    --muted2: #E4E0DA;
-    --muted3: #D4D0F5;
+    --night: #0d1210;
+    --on-night: #eeeae2;
+    --on-night-2: #a7b0aa;
+    --ground: #ecede8;
+    --store-card: #ffffff;
+    --well: #f6f6f2;
+    --line: #dce0d8;
+    --ink-2: #38463f;
+    --accent: #1e4a38;
+    --accent-2: #2c6650;
+    --brass: #8e6a35;
+    --plank: #d8c9b0;
+    --plank-top: #eadfcc;
+    --ok-bg: #e7f1ea;
+    --ok-fg: #1c4a2e;
+    --base: #0d1210;
+    --paper: #eeeae2;
+    --ink: #14201a;
+    --text: #eeeae2;
+    --text2: #a7b0aa;
+    --muted: #a7b0aa;
+    --muted2: #c4cbc5;
+    --muted3: #a7b0aa;
     --card: rgba(255,255,255,0.07);
     --card-line: rgba(255,255,255,0.12);
     --divider: rgba(255,255,255,0.1);
-    --raised: #1D1A28;
-    --yellow: #FFD54A; --yellow-sh: #C99A00;
-    --mint: #5EEAB4; --mint-l: #A6F7D8; --mint-d: #0B4A36;
-    --pink: #FF9FE8; --hot: #FF4FD8; --hot-sh: #A8228F;
-    --cyan: #2EE6F6; --cyan-sh: #0E8FA0;
-    --lilac: #B7A4FF; --lilac-l: #D9D4FF;
-    --sky: #8FD0FF; --sky2: #A8F0FF; --sky3: #BFE3FF;
-    --coral: #FF8A65; --peach: #FFB4A2; --apricot: #FFC070;
-    --red: #FF4D5E; --red-sh: #B3202F; --red-t: #FF8A93;
-    --orchid: #D68FE0;
-    --sans: 'Bricolage Grotesque', system-ui, sans-serif;
-    --serif: 'Instrument Serif', Georgia, serif;
-    --mono: 'DM Mono', ui-monospace, monospace;
+    --raised: #17201c;
+    --yellow: #e8c48a; --yellow-sh: #8e6a35;
+    --mint: #1e4a38; --mint-l: #e7f1ea; --mint-d: #1c4a2e;
+    --pink: #bd8f70; --hot: #8e6a35; --hot-sh: #6f512a;
+    --cyan: #597568; --cyan-sh: #3d5b4e;
+    --lilac: #87958a; --lilac-l: #d9e1d8;
+    --sky: #8ea89a; --sky2: #a8c0b2; --sky3: #bfd2c5;
+    --coral: #a76e52; --peach: #d5a58b; --apricot: #d6ba8e;
+    --red: #a33b37; --red-sh: #7d2926; --red-t: #e59a91;
+    --orchid: #987b86;
+    --sans: 'Geist', 'Bricolage Grotesque', system-ui, sans-serif;
+    --serif: 'Newsreader', 'Instrument Serif', Georgia, 'Times New Roman', serif;
+    --mono: 'Geist Mono', 'DM Mono', ui-monospace, Menlo, monospace;
     --settle: cubic-bezier(.22,.9,.24,1);
     --morph: cubic-bezier(.65,0,.35,1);
-    --glow-home: radial-gradient(900px 640px at 0% 0%, rgba(255,79,216,0.26), transparent 62%), radial-gradient(800px 600px at 100% 4%, rgba(46,230,246,0.22), transparent 60%), radial-gradient(700px 520px at 55% 30%, rgba(255,213,74,0.13), transparent 62%), radial-gradient(800px 600px at 0% 58%, rgba(94,234,180,0.17), transparent 62%), radial-gradient(800px 600px at 100% 74%, rgba(255,138,101,0.2), transparent 62%), radial-gradient(900px 640px at 35% 100%, rgba(183,164,255,0.18), transparent 62%), #0E0C10;
-    --glow-shelf: radial-gradient(900px 640px at 0% 0%, rgba(46,230,246,0.24), transparent 62%), radial-gradient(800px 600px at 100% 4%, rgba(255,79,216,0.24), transparent 60%), radial-gradient(700px 520px at 55% 30%, rgba(255,213,74,0.13), transparent 62%), radial-gradient(800px 600px at 0% 58%, rgba(94,234,180,0.17), transparent 62%), radial-gradient(800px 600px at 100% 74%, rgba(255,138,101,0.2), transparent 62%), radial-gradient(900px 640px at 35% 100%, rgba(183,164,255,0.18), transparent 62%), #0E0C10;
-    --glow-settings: radial-gradient(900px 640px at 0% 0%, rgba(255,79,216,0.24), transparent 62%), radial-gradient(800px 600px at 100% 2%, rgba(46,230,246,0.2), transparent 60%), radial-gradient(800px 600px at 0% 24%, rgba(255,213,74,0.12), transparent 62%), radial-gradient(800px 600px at 100% 42%, rgba(94,234,180,0.14), transparent 62%), radial-gradient(800px 600px at 0% 62%, rgba(255,138,101,0.16), transparent 62%), radial-gradient(800px 600px at 100% 82%, rgba(183,164,255,0.16), transparent 62%), radial-gradient(900px 640px at 30% 100%, rgba(255,79,216,0.16), transparent 62%), #0E0C10;
+    --glow-home: radial-gradient(900px 640px at 0% 0%, rgba(142,106,53,0.18), transparent 62%), radial-gradient(800px 600px at 100% 8%, rgba(89,117,104,0.17), transparent 60%), radial-gradient(900px 640px at 35% 100%, rgba(30,74,56,0.16), transparent 62%), #0d1210;
+    --glow-shelf: radial-gradient(900px 640px at 0% 0%, rgba(89,117,104,0.18), transparent 62%), radial-gradient(800px 600px at 100% 12%, rgba(142,106,53,0.15), transparent 60%), radial-gradient(900px 640px at 35% 100%, rgba(30,74,56,0.16), transparent 62%), #0d1210;
+    --glow-settings: radial-gradient(900px 640px at 0% 0%, rgba(142,106,53,0.16), transparent 62%), radial-gradient(800px 600px at 100% 20%, rgba(89,117,104,0.17), transparent 60%), radial-gradient(900px 640px at 30% 100%, rgba(30,74,56,0.16), transparent 62%), #0d1210;
     color-scheme: dark;
 }
 *, *::before, *::after { box-sizing: border-box; }
@@ -289,3 +303,210 @@ dialog.dlg .btnrow { justify-content: flex-end; margin-top: 6px; }
 .priv.locked { cursor: default !important; }
 :root:not([data-show-private]) input.priv:not(:focus) { color: transparent; text-shadow: 0 0 9px rgba(20,18,58,0.75); }
 .priv:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+
+body:not(:has(.discover.storefront)) {
+    background: var(--ground);
+    color: var(--ink);
+    color-scheme: light;
+}
+body:not(:has(.discover.storefront)) #bg { background: var(--ground) !important; }
+body:not(:has(.discover.storefront)) main.page { color: var(--ink); }
+body:not(:has(.discover.storefront)) .h-page,
+body:not(:has(.discover.storefront)) .h-sec,
+body:not(:has(.discover.storefront)) .h-sub,
+body:not(:has(.discover.storefront)) .h2,
+body:not(:has(.discover.storefront)) .rhead,
+body:not(:has(.discover.storefront)) .more-h h2 { color: var(--ink); font-weight: 500; }
+body:not(:has(.discover.storefront)) .h-page { letter-spacing: -.035em; }
+body:not(:has(.discover.storefront)) .h-sec { letter-spacing: -.035em; }
+body:not(:has(.discover.storefront)) .lede,
+body:not(:has(.discover.storefront)) .desc,
+body:not(:has(.discover.storefront)) .count,
+body:not(:has(.discover.storefront)) .rmeta,
+body:not(:has(.discover.storefront)) .note { color: var(--muted); }
+body:not(:has(.discover.storefront)) .card,
+body:not(:has(.discover.storefront)) .libsum,
+body:not(:has(.discover.storefront)) .lib,
+body:not(:has(.discover.storefront)) .rcard,
+body:not(:has(.discover.storefront)) .job,
+body:not(:has(.discover.storefront)) .item,
+body:not(:has(.discover.storefront)) .stat {
+    color: var(--ink);
+    background: var(--store-card);
+    border-color: var(--line);
+    box-shadow: 0 0 0 1px rgba(20,32,26,.04);
+}
+body:not(:has(.discover.storefront)) .card .desc,
+body:not(:has(.discover.storefront)) .card .lede,
+body:not(:has(.discover.storefront)) .item .path,
+body:not(:has(.discover.storefront)) .item .orig,
+body:not(:has(.discover.storefront)) .item .when { color: var(--muted); }
+body:not(:has(.discover.storefront)) .row .rt b,
+body:not(:has(.discover.storefront)) .job-t b,
+body:not(:has(.discover.storefront)) .item .it b { color: var(--ink); font-weight: 500; }
+body:not(:has(.discover.storefront)) .field { color: var(--ink-2); }
+body:not(:has(.discover.storefront)) .input,
+body:not(:has(.discover.storefront)) .on-paper .input,
+body:not(:has(.discover.storefront)) .selwrap.paper,
+body:not(:has(.discover.storefront)) .selwrap.paper select {
+    background: var(--well);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--line);
+}
+body:not(:has(.discover.storefront)) .input::placeholder { color: var(--muted); }
+body:not(:has(.discover.storefront)) .input:focus,
+body:not(:has(.discover.storefront)) .selwrap.paper:focus-within {
+    outline: 1.5px solid var(--accent);
+    outline-offset: 1px;
+}
+body:not(:has(.discover.storefront)) .btn.yellow,
+body:not(:has(.discover.storefront)) .btn.pink,
+body:not(:has(.discover.storefront)) .btn.cyan {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: none;
+    font-weight: 500;
+}
+body:not(:has(.discover.storefront)) .btn.yellow:hover,
+body:not(:has(.discover.storefront)) .btn.pink:hover,
+body:not(:has(.discover.storefront)) .btn.cyan:hover { background: var(--accent-2); }
+body:not(:has(.discover.storefront)) .btn.dark { background: var(--ink); color: #fff; box-shadow: none; }
+body:not(:has(.discover.storefront)) .btn.outline {
+    color: var(--accent);
+    border: 1px solid var(--line);
+    background: transparent;
+    font-weight: 500;
+}
+body:not(:has(.discover.storefront)) .btn.outline-ink {
+    color: var(--accent);
+    border: 1px solid var(--line);
+    font-weight: 500;
+}
+body:not(:has(.discover.storefront)) .disclose {
+    color: var(--ink-2);
+    border-color: var(--line);
+    background: var(--store-card);
+    font-weight: 500;
+}
+body:not(:has(.discover.storefront)) .switch { background: #d3d9d2; }
+body:not(:has(.discover.storefront)) .switch::before { background: #fff; }
+body:not(:has(.discover.storefront)) .switch[aria-checked="true"] { background: var(--accent); }
+body:not(:has(.discover.storefront)) .switch[aria-checked="true"]::before { background: #fff; }
+body:not(:has(.discover.storefront)) .seg {
+    background: var(--well);
+    border: 1px solid var(--line);
+}
+body:not(:has(.discover.storefront)) .seg > .on,
+body:not(:has(.discover.storefront)) .seg > [aria-current="page"] {
+    background: var(--store-card);
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(20,32,26,.12);
+}
+body:not(:has(.discover.storefront)) .tabbar {
+    background: rgba(20,32,26,.94);
+    border-color: rgba(20,32,26,.12);
+}
+body:not(:has(.discover.storefront)) .pastel {
+    background: var(--store-card);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    box-shadow: 0 0 0 1px rgba(20,32,26,.04);
+}
+body:not(:has(.discover.storefront)) .pastel .desc,
+body:not(:has(.discover.storefront)) .pastel .name,
+body:not(:has(.discover.storefront)) .pastel .label { color: var(--ink-2) !important; }
+body:not(:has(.discover.storefront)) .pastel .btn { background: var(--accent); color: #fff; }
+body:not(:has(.discover.storefront)) .how li.step,
+body:not(:has(.discover.storefront)) .keyrow,
+body:not(:has(.discover.storefront)) .qbstat,
+body:not(:has(.discover.storefront)) .tiles div,
+body:not(:has(.discover.storefront)) .vpntiles div {
+    background: var(--store-card);
+    color: var(--ink);
+    border: 1px solid var(--line);
+}
+body:not(:has(.discover.storefront)) .how li.step i { background: var(--accent) !important; color: #fff; }
+body:not(:has(.discover.storefront)) .status,
+body:not(:has(.discover.storefront)) .tunnelchips span { background: var(--ok-bg); color: var(--ok-fg); }
+body:not(:has(.discover.storefront)) .adv,
+body:not(:has(.discover.storefront)) .adv.sheet,
+body:not(:has(.discover.storefront)) .menu,
+body:not(:has(.discover.storefront)) dialog.dlg,
+body:not(:has(.discover.storefront)) .verify-box {
+    background: var(--store-card);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    box-shadow: 0 18px 50px rgba(20,32,26,.16);
+}
+body:not(:has(.discover.storefront)) .adv .adv-t,
+body:not(:has(.discover.storefront)) .adv .fchip,
+body:not(:has(.discover.storefront)) .menu button,
+body:not(:has(.discover.storefront)) dialog.dlg { color: var(--ink); }
+body:not(:has(.discover.storefront)) .fchip { border-color: var(--line); color: var(--ink-2); }
+body:not(:has(.discover.storefront)) .fchip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+body:not(:has(.discover.storefront)) .menu button:hover,
+body:not(:has(.discover.storefront)) .menu button:focus-visible { background: var(--well); }
+body:not(:has(.discover.storefront)) .menu button.danger { color: var(--red); }
+body:not(:has(.discover.storefront)) .verify {
+    background: rgba(13,18,16,.66);
+    backdrop-filter: blur(6px);
+}
+body:not(:has(.discover.storefront)) footer.site {
+    color: var(--on-night);
+    background: var(--night);
+    border-top: 0;
+    max-width: none;
+}
+body:not(:has(.discover.storefront)) footer.site span { color: var(--on-night-2); }
+body:not(:has(.discover.storefront)) .empty {
+    background: var(--well);
+    color: var(--muted);
+    border-color: var(--line);
+}
+body:not(:has(.discover.storefront)) .empty b { color: var(--ink); }
+body:not(:has(.discover.storefront)) .toast { background: var(--ink); color: #fff; }
+body:not(:has(.discover.storefront)) :focus-visible { outline-color: var(--brass); }
+body:has(.gate, .setup) {
+    background:
+        radial-gradient(800px 500px at 10% 0%, rgba(142,106,53,.12), transparent 60%),
+        var(--ground);
+}
+body:has(.gate, .setup) .gate-card,
+body:has(.gate, .setup) .scard {
+    background: var(--store-card);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    box-shadow: 0 18px 48px rgba(20,32,26,.08);
+}
+body:has(.gate, .setup) .gate-card .lede,
+body:has(.gate, .setup) .scard .lede,
+body:has(.gate, .setup) .scard .label { color: var(--muted); }
+body:has(.gate, .setup) .gate-card .field { color: var(--ink-2); }
+body:has(.gate, .setup) .opt,
+body:has(.gate, .setup) .bigswitch,
+body:has(.gate, .setup) .dash {
+    background: var(--well);
+    color: var(--ink);
+    border: 1px solid var(--line);
+}
+body:has(.gate, .setup) .opt[aria-checked="true"] { background: var(--ok-bg); border-color: var(--accent); }
+body:has(.gate, .setup) .opt span,
+body:has(.gate, .setup) .dash { color: var(--muted); }
+body:has(.gate, .setup) .tiles span { color: var(--muted); }
+body:has(.gate, .setup) .sbars span { background: var(--line); }
+body:has(.gate, .setup) .lockup { max-width: none; width: auto; }
+body:has(.gate, .setup) .ph-lockup { display: flex; align-items: center; gap: 12px; color: var(--ink); font-size: 20px; font-weight: 600; }
+body:has(.gate, .setup) .ph-lockup .ph-mark {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font: italic 17px var(--serif);
+}
+body:has(.gate, .setup) .sstep h1 { font-weight: 500; letter-spacing: -.035em; color: var(--ink); }
+body:has(.gate, .setup) .sstep h1 .serif { color: var(--brass) !important; }
+body:has(.gate, .setup) .sstep .mono { color: var(--ink-2) !important; }
+body:has(.gate, .setup) .gate-card .h-sec .serif { color: var(--brass) !important; }
+body:has(.gate, .setup) .gate-card .btn.outline { color: var(--accent); border-color: var(--line); }
