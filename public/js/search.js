@@ -130,7 +130,7 @@ function renderDiscover() {
         <div class="storefront-shell">
           <header class="top storefront-top" id="top">
             <div class="wrap store-wrap">
-              <a class="brand" href="#"><span class="mono-mark" aria-hidden="true">Ph</span>Pagehouse</a>
+              <a class="brand" href="#"><span class="mono-mark" aria-hidden="true">QC</span>Quiet Chapters</a>
               <nav class="links" aria-label="Main">
                 <a href="#store">Shelves</a>
                 <a href="#categories">Categories</a>
@@ -152,7 +152,7 @@ function renderDiscover() {
               <div class="beats">
                 <div class="beat" data-a="0" data-b=".2">
                   <div class="wrap"><div class="in">
-                    <span class="eyebrow">Pagehouse · Accra</span>
+                    <span class="eyebrow">Quiet Chapters · Accra</span>
                     <h1>Books worth keeping, for <em>five cedis.</em></h1>
                     <p>Explore enduring stories, ideas about society and self, and clear introductions to essential subjects.</p>
                     <div class="ctas"><button type="button" class="btn light" data-scroll="#store">Browse the shelves</button><button type="button" class="btn line" data-scroll="#request">Request a book</button></div>
@@ -187,7 +187,7 @@ function renderDiscover() {
             </div>
           </section>
 
-          <section class="facts" aria-label="Why Pagehouse">
+          <section class="facts" aria-label="Why Quiet Chapters">
             <div class="wrap store-wrap">
               <div class="fact"><b>GH₵ 5, every book</b><span>One flat price, no subscriptions</span></div>
               <div class="fact"><b>Curated by ideas</b><span>Browse across identity, society, learning and more</span></div>
@@ -299,11 +299,11 @@ function renderDiscover() {
 
         <footer>
           <div class="wrap store-wrap">
-            <div><a class="brand" href="#"><span class="mono-mark" aria-hidden="true">Ph</span>Pagehouse</a><p style="margin:0;max-width:30ch;font-size:14px">Low-cost PDF books for readers in Ghana. Every title GH₵ 5.</p></div>
+            <div><a class="brand" href="#"><span class="mono-mark" aria-hidden="true">QC</span>Quiet Chapters</a><p style="margin:0;max-width:30ch;font-size:14px">Low-cost PDF books for readers in Ghana. Every title GH₵ 5.</p></div>
             <div><h4>Store</h4><ul><li><a href="#store">Shelves</a></li><li><a href="#categories">Categories</a></li><li><a href="#checkout">Bag</a></li></ul></div>
             <div><h4>Help</h4><ul><li><a href="#how">How it works</a></li><li><a href="#request">Request a book</a></li><li><a href="#how">Delivery and refunds</a></li></ul></div>
             <div><h4>Legal</h4><ul><li><a href="#">Terms of Sale</a></li><li><a href="#">Privacy Policy</a></li><li><a href="#">Data protection (Act 843)</a></li></ul></div>
-            <div class="base"><span>© 2026 Pagehouse · Accra, Ghana</span><span>Books worth keeping, for every curious mind.</span></div>
+            <div class="base"><span>© 2026 Quiet Chapters · Accra, Ghana</span><span>Books worth keeping, for every curious mind.</span></div>
           </div>
         </footer>
 

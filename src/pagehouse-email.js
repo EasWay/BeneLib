@@ -48,7 +48,7 @@ db.exec(`
 export function emailConfig() {
   // Without PAGEHOUSE_EMAIL_FROM, send as the account we sign in with (what Gmail and most providers require).
   const user = String(process.env.SMTP_USER || '').trim();
-  const from = parseAddress(process.env.PAGEHOUSE_EMAIL_FROM || (emailOk(user.toLowerCase()) ? `Pagehouse <${user}>` : ''));
+  const from = parseAddress(process.env.PAGEHOUSE_EMAIL_FROM || (emailOk(user.toLowerCase()) ? `Quiet Chapters <${user}>` : ''));
   const limit = Number(process.env.PAGEHOUSE_EMAIL_DAILY_LIMIT || 300);
   const secure = String(process.env.SMTP_SECURE || 'starttls').trim().toLowerCase();
   const host = String(process.env.SMTP_HOST || '').trim();
@@ -72,7 +72,7 @@ function parseAddress(value) {
   const v = oneLine(value, 300);
   const m = v.match(/^(.*?)\s*<([^<>]+)>$/);
   const email = (m ? m[2] : v).trim().toLowerCase(), name = (m ? m[1] : '').replace(/^"|"$/g, '').trim();
-  return emailOk(email) ? { email, name: name || 'Pagehouse' } : null;
+  return emailOk(email) ? { email, name: name || 'Quiet Chapters' } : null;
 }
 
 // The storefront's address for links. PAGEHOUSE_PUBLIC_URL, else the origin of the Paystack callback URL.
@@ -191,19 +191,19 @@ function render({ heading, paragraphs = [], action, after = [], footer }) {
   const tail = after.map(x => typeof x === 'string' ? p(x) : x.html).join('');
   const html = `<!doctype html><html><body style="margin:0;background:#EDEBE5;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#14201A">
 <div style="max-width:560px;margin:0 auto;padding:32px 16px">
-<p style="margin:0 0 20px;font-family:Georgia,serif;font-size:20px;font-style:italic;color:#1F3B2D">Pagehouse</p>
+<p style="margin:0 0 20px;font-family:Georgia,serif;font-size:20px;font-style:italic;color:#1F3B2D">Quiet Chapters</p>
 <div style="background:#FFFFFF;border-radius:18px;padding:28px 26px;font-size:15px">
 <h1 style="margin:0 0 16px;font-size:22px;font-weight:600;letter-spacing:-.01em">${esc(heading)}</h1>
 ${body}${action ? button(action.href, action.label) : ''}${tail}
 </div>
-<p style="margin:18px 6px 0;font-size:12.5px;line-height:1.5;color:#6B746F">${esc(footer || 'Pagehouse · Books worth keeping, for five cedis.')}</p>
+<p style="margin:18px 6px 0;font-size:12.5px;line-height:1.5;color:#6B746F">${esc(footer || 'Quiet Chapters · Books worth keeping, for five cedis.')}</p>
 </div></body></html>`;
   const plain = x => typeof x === 'string' ? x : x.text;
-  const text = [heading, '', ...paragraphs.map(plain), ...(action && action.href ? ['', `${action.label}: ${action.href}`] : []), ...(after.length ? ['', ...after.map(plain)] : []), '', footer || 'Pagehouse'].join('\n');
+  const text = [heading, '', ...paragraphs.map(plain), ...(action && action.href ? ['', `${action.label}: ${action.href}`] : []), ...(after.length ? ['', ...after.map(plain)] : []), '', footer || 'Quiet Chapters'].join('\n');
   return { html, text };
 }
 
-const requestFooter = 'You are getting this because you asked Pagehouse to look for a book. We only use your email for this request.';
+const requestFooter = 'You are getting this because you asked Quiet Chapters to look for a book. We only use your email for this request.';
 const describe = r => `“${r.title}” by ${r.author}`;
 
 export function requestReceived(r) {
@@ -211,7 +211,7 @@ export function requestReceived(r) {
     heading: 'We’re looking for your book',
     paragraphs: [
       r.name ? `Hi ${r.name},` : 'Hi,',
-      `Thanks for your request for ${describe(r)}. We check every book added to Pagehouse against it, every day, until ${new Date(r.expires_at).toUTCString().slice(5, 16)}.`,
+      `Thanks for your request for ${describe(r)}. We check every book added to Quiet Chapters against it, every day, until ${new Date(r.expires_at).toUTCString().slice(5, 16)}.`,
       'If we add it, we’ll email you a link straight away. If it doesn’t turn up within 30 days, we’ll let you know too.',
       `Your request reference is ${r.reference}.`,
     ],
@@ -226,13 +226,13 @@ export function requestMatched(r, book) {
     heading: 'Your book is on the shelves',
     paragraphs: [
       r.name ? `Hi ${r.name},` : 'Hi,',
-      `Good news: you asked us for ${describe(r)}, and it’s now in the Pagehouse catalogue as “${book.title}”${book.authors ? ` by ${book.authors}` : ''}.`,
+      `Good news: you asked us for ${describe(r)}, and it’s now in the Quiet Chapters catalogue as “${book.title}”${book.authors ? ` by ${book.authors}` : ''}.`,
       'Requested books are GH₵ 5, like everything else on the shelves.',
     ],
     action: { href: link('/?find=' + encodeURIComponent(book.title) + '#store'), label: 'See the book' },
     footer: requestFooter,
   });
-  return { key: `request-matched:${r.id}:${book.id}`, kind: 'request-matched', to: r.email, toName: r.name, subject: `Found it: “${oneLine(book.title, 120)}” is on Pagehouse`, html, text };
+  return { key: `request-matched:${r.id}:${book.id}`, kind: 'request-matched', to: r.email, toName: r.name, subject: `Found it: “${oneLine(book.title, 120)}” is on Quiet Chapters`, html, text };
 }
 
 export function requestExpired(r) {
@@ -258,7 +258,7 @@ export function ownerNewRequest(r, owner) {
       r.status === 'matched' ? 'It already matched a published book, and the customer has been told.' : 'It is open and will be matched against new books for 30 days.',
     ],
     action: { href: link('/admin'), label: 'Open the admin panel' },
-    footer: 'Owner alert from your Pagehouse store.',
+    footer: 'Owner alert from your Quiet Chapters store.',
   });
   return { key: `owner-request:${r.id}`, kind: 'owner-request', to: owner, subject: `New request: ${oneLine(r.title, 120)}`, html, text };
 }
@@ -277,12 +277,12 @@ export function orderReceipt(order, items) {
       ...rows,
     ],
     after: ['Each link works for 24 hours and up to 5 downloads. Keep this email: it is your receipt.'],
-    footer: 'Pagehouse receipt. Reply to this email if a download does not work.',
+    footer: 'Quiet Chapters receipt. Reply to this email if a download does not work.',
   });
-  return { key: `order-receipt:${order.id}`, kind: 'order-receipt', to: order.email, subject: `Your Pagehouse books · ${order.reference}`, html, text };
+  return { key: `order-receipt:${order.id}`, kind: 'order-receipt', to: order.email, subject: `Your Quiet Chapters books · ${order.reference}`, html, text };
 }
 
 export function testEmail(to) {
-  const { html, text } = render({ heading: 'Pagehouse email works', paragraphs: ['This is a test from your Pagehouse admin panel. If you can read it, customer and owner emails will be delivered.'], footer: 'Test message.' });
-  return { key: `test:${crypto.randomUUID()}`, kind: 'test', to, subject: 'Pagehouse test email', html, text };
+  const { html, text } = render({ heading: 'Quiet Chapters email works', paragraphs: ['This is a test from your Quiet Chapters admin panel. If you can read it, customer and owner emails will be delivered.'], footer: 'Test message.' });
+  return { key: `test:${crypto.randomUUID()}`, kind: 'test', to, subject: 'Quiet Chapters test email', html, text };
 }

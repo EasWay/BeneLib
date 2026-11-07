@@ -227,7 +227,7 @@ for (const mode of ['public', 'family']) {
         assert.equal((await s.call('POST', '/api/store/admin/rights-policy/apply-existing', { body: {}, cookie: s.admin })).status, 200, mode + ' admin applies rights policy');
         const rootPage = await s.call('GET', '/');
         assert.equal(rootPage.status, 200, mode + ' storefront root');
-        assert.match(rootPage.text, /<title>Pagehouse Store<\/title>/, mode + ' root serves Pagehouse storefront');
+        assert.match(rootPage.text, /<title>Quiet Chapters<\/title>/, mode + ' root serves Quiet Chapters storefront');
         assert.doesNotMatch(rootPage.text, /Try another title or author\. The storefront only shows books currently listed in the approved catalogue\./, mode + ' no longer shows the outdated catalogue-only search hint');
         assert.match(rootPage.text, /data-src-result=/, mode + ' source results are drawn as openable store books');
         assert.match(rootPage.text, /function paintCover\(b, rough\)/, mode + ' catalog books without artwork get generated title covers');
@@ -236,10 +236,10 @@ for (const mode of ['public', 'family']) {
         assert.match(settingsModule.text, /Store catalogue/, mode + ' admin module includes store management');
         const adminPage = await s.call('GET', '/admin');
         assert.equal(adminPage.status, 200, mode + ' admin app route');
-        assert.doesNotMatch(adminPage.text, /<title>Pagehouse Store<\/title>/, mode + ' admin route serves app shell');
+        assert.doesNotMatch(adminPage.text, /<meta name="description" content="Browse and discover books/, mode + ' admin route serves app shell');
         const settingsPage = await s.call('GET', '/settings');
         assert.equal(settingsPage.status, 200, mode + ' settings app route');
-        assert.doesNotMatch(settingsPage.text, /<title>Pagehouse Store<\/title>/, mode + ' settings retains app shell');
+        assert.doesNotMatch(settingsPage.text, /<meta name="description" content="Browse and discover books/, mode + ' settings retains app shell');
         assert.equal((await s.call('PUT', '/api/store/admin/rights-policy', { body: { license: '', rightsScope: '', rightsEvidence: '' }, cookie: s.admin })).status, 200, mode + ' admin clears future-import policy');
         assert.equal((await s.call('POST', '/api/store/admin/catalog/import', { body: { items: [{
             sourceId: 'rights-test', sourceRef: 'review-1', sourceName: 'Rights test source',

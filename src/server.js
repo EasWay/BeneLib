@@ -234,9 +234,9 @@ const secure = req => req.headers['x-forwarded-proto'] === 'https';
 function relyingParty(req) {
     const host = String((process.env.TRUST_PROXY === '1' && req.headers['x-forwarded-host']) || req.headers.host || '').split(',')[0].trim().toLowerCase();
     const hostname = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-    if (!hostname || net.isIP(hostname)) throw Object.assign(new Error('Open Pagehouse by its name, not an IP address, to use Face ID or fingerprint.'), { statusCode: 400 });
+    if (!hostname || net.isIP(hostname)) throw Object.assign(new Error('Open Quiet Chapters by its name, not an IP address, to use Face ID or fingerprint.'), { statusCode: 400 });
     const https = secure(req) || !!req.socket.encrypted;
-    if (!https && hostname !== 'localhost' && !hostname.endsWith('.localhost')) throw Object.assign(new Error('Face ID and fingerprint need the secure (https) address of Pagehouse.'), { statusCode: 400 });
+    if (!https && hostname !== 'localhost' && !hostname.endsWith('.localhost')) throw Object.assign(new Error('Face ID and fingerprint need the secure (https) address of Quiet Chapters.'), { statusCode: 400 });
     return { id: hostname, origin: `${https ? 'https' : 'http'}://${host}` };
 }
 const libraryView = lib => ({ library: pagehouseLibrary.summary(lib), requests: pagehouseRequests.libraryRequests(lib.id), orders: pagehousePayments.libraryOrders(lib.id) });

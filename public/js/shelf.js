@@ -252,7 +252,7 @@ async function renderStats() {
     let s;
     try { s = await api('/api/stats?period=' + statsPeriod); } catch (e) { root.innerHTML = frame('stats', `<p class="err">${esc(e.message)}</p></section>`); return; }
     const intro = `<p class="lede">Counted on this server and never sent anywhere. It shows what you read most and what it costs in disk space. You can switch counting off in the <a href="/admin#privacy" class="u" style="font-size:inherit;color:inherit">admin panel, under Privacy and backup</a>.</p>`;
-    if (!s.enabled) { root.innerHTML = frame('stats', intro + `</section><div class="empty"><b>Counting is off</b><span>Switch on Keep stats in the admin panel, under Privacy and backup, and Pagehouse starts counting from the next download.</span><a class="btn yellow sm" href="/admin#privacy">Privacy settings</a></div>`); return; }
+    if (!s.enabled) { root.innerHTML = frame('stats', intro + `</section><div class="empty"><b>Counting is off</b><span>Switch on Keep stats in the admin panel, under Privacy and backup, and Quiet Chapters starts counting from the next download.</span><a class="btn yellow sm" href="/admin#privacy">Privacy settings</a></div>`); return; }
     const periods = [['all', 'All time'], ['year', 'This year'], ['30d', 'Last 30 days']];
     root.innerHTML = frame('stats', intro + `</section><section aria-label="Stats" class="sset" style="gap:22px">
         <div class="seg" role="radiogroup" aria-label="Period">${periods.map(([v, l]) => `<button type="button" role="radio" aria-checked="${v === statsPeriod}" data-act="period" data-v="${v}">${l}</button>`).join('')}</div>

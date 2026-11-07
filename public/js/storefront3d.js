@@ -17,7 +17,7 @@ function bookData(book) {
     return {
         ...book,
         t: String(book.t || book.title || 'A Good Book'),
-        a: String(book.a || book.author || 'Pagehouse Editions'),
+        a: String(book.a || book.author || 'Quiet Chapters Editions'),
         y: book.y ?? book.year ?? 2026,
         bg: book.bg || '#1f3b2d',
         fg: book.fg || '#f4efe8',
@@ -126,7 +126,7 @@ function paintCover(book, rough = false) {
     context.fillRect(140, TEXTURE_HEIGHT - 268, 150, 3);
     context.fillStyle = rough ? '#3a3a3a' : dark ? 'rgba(239,233,220,.7)' : book.fg;
     context.font = '500 24px "Geist Mono", monospace';
-    spaced(context, 'PAGEHOUSE EDITION', 140, TEXTURE_HEIGHT - 190, 8);
+    spaced(context, 'QUIET CHAPTERS EDITION', 140, TEXTURE_HEIGHT - 190, 8);
     context.strokeStyle = context.fillStyle;
     context.lineWidth = 2.5;
     context.beginPath();
@@ -134,7 +134,7 @@ function paintCover(book, rough = false) {
     context.stroke();
     context.font = 'italic 400 34px Newsreader, Georgia, serif';
     context.textAlign = 'center';
-    context.fillText('Ph', TEXTURE_WIDTH - 190, TEXTURE_HEIGHT - 189);
+    context.fillText('QC', TEXTURE_WIDTH - 190, TEXTURE_HEIGHT - 189);
     context.textAlign = 'left';
     return target;
 }
@@ -192,7 +192,7 @@ function paintPage(kind, book) {
         context.fillRect(middle - 60, 700 + lines.length * 100, 120, 3);
         context.fillStyle = '#6B5A44';
         context.font = 'italic 400 34px Newsreader, Georgia, serif';
-        context.fillText('The Pagehouse Edition', middle, 800 + lines.length * 100);
+        context.fillText('The Quiet Chapters Edition', middle, 800 + lines.length * 100);
         context.font = '500 22px "Geist Mono", monospace';
         context.fillText('ACCRA · 2026', middle, TEXTURE_HEIGHT - 170);
     } else if (kind === 'edition-back') {
@@ -202,7 +202,7 @@ function paintPage(kind, book) {
         [
             book.t, `by ${book.a}`, '', `First published ${book.y}.`,
             '',
-            'This edition typeset by Pagehouse,', 'Accra, Ghana, 2026.',
+            'This edition typeset by Quiet Chapters,', 'Accra, Ghana, 2026.',
         ].forEach((line, index) => context.fillText(line, left, TEXTURE_HEIGHT - 560 + index * 40));
     } else if (kind === 'chapter') {
         context.fillStyle = '#6B5A44';
@@ -567,7 +567,7 @@ export function mountStorefront3d({ hero, viewer, scrollRoot, scene, stage, beat
     const initialize = () => {
         if (disposed) return;
         if (!THREEReady) {
-            console.error('Pagehouse 3D is unavailable because Three.js or WebGL could not be loaded.');
+            console.error('Quiet Chapters 3D is unavailable because Three.js or WebGL could not be loaded.');
             scrollRoot?.classList.add('no3d');
             makeFallback(fallback, heroBook);
             return;
@@ -581,7 +581,7 @@ export function mountStorefront3d({ hero, viewer, scrollRoot, scene, stage, beat
             heroStage.resize();
             kick();
         } catch (error) {
-            console.error('Unable to initialize the Pagehouse hero renderer:', error);
+            console.error('Unable to initialize the Quiet Chapters hero renderer:', error);
             scrollRoot?.classList.add('no3d');
             makeFallback(fallback, heroBook);
         }
@@ -593,7 +593,7 @@ export function mountStorefront3d({ hero, viewer, scrollRoot, scene, stage, beat
             viewerStage.setBook(activeBook || heroBook);
             viewerStage.resize();
         } catch (error) {
-            console.error('Unable to initialize the Pagehouse book viewer:', error);
+            console.error('Unable to initialize the Quiet Chapters book viewer:', error);
         }
     };
     const updateDimensions = () => {

@@ -63,7 +63,7 @@ export function coseToKey(cose) {
   if (kty === 2 && alg === ALG_ES256 && cose.get(-1) === 1) return { alg, key: crypto.createPublicKey({ format: 'jwk', key: { kty: 'EC', crv: 'P-256', x: bytes(-2), y: bytes(-3) } }) };
   if (kty === 3 && alg === ALG_RS256) return { alg, key: crypto.createPublicKey({ format: 'jwk', key: { kty: 'RSA', n: bytes(-1), e: bytes(-2) } }) };
   if (kty === 1 && alg === ALG_EDDSA && cose.get(-1) === 6) return { alg, key: crypto.createPublicKey({ format: 'jwk', key: { kty: 'OKP', crv: 'Ed25519', x: bytes(-2) } }) };
-  throw new Error('This passkey uses an algorithm Pagehouse does not accept');
+  throw new Error('This passkey uses an algorithm Quiet Chapters does not accept');
 }
 
 function checkClientData(clientDataB64, type, expected) {

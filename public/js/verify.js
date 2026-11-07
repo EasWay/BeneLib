@@ -14,7 +14,7 @@ export function openVerify(onDone, site = 'annas') {
     ov.className = 'verify';
     ov.innerHTML = `<div class="verify-box" role="dialog" aria-modal="true" aria-label="${name} check">
         <div class="verify-h"><b>${name} check</b><span class="btnrow" style="gap:8px"><button type="button" class="btn outline xs" id="v-reload">Reload</button><button type="button" class="btn outline xs" id="v-full" aria-pressed="false">Whole page</button><button type="button" class="btn outline xs" id="v-close">Close</button></span></div>
-        <p class="desc" style="margin:0">This is the browser running on your Pagehouse server, zoomed in on the check. Tap the box. If it asks for more, tap the text field in the picture, type the characters below and press Verify in the picture. It closes by itself once you are through, and the pass is remembered.</p>
+        <p class="desc" style="margin:0">This is the browser running on your Quiet Chapters server, zoomed in on the check. Tap the box. If it asks for more, tap the text field in the picture, type the characters below and press Verify in the picture. It closes by itself once you are through, and the pass is remembered.</p>
         <div class="v-stage"><img id="v-frame" alt="The server's browser" tabindex="0"></div>
         <form id="v-type" class="btnrow" style="flex-wrap:nowrap"><input class="input" id="v-text" placeholder="Type the characters here" aria-label="Text to type into the check" autocomplete="off"><button type="submit" class="btn yellow sm">Send</button></form>
         <p class="inline-msg" id="v-status" aria-live="polite">Starting the browser…</p></div>`;
@@ -77,5 +77,5 @@ export function openVerify(onDone, site = 'annas') {
     post('/browser/verify', { action: 'start', site, phone: isPhone() }).then(r => r.json()).then(r => {
         if (!r.ok) { running = false; status.innerHTML = esc(r.reason || 'Could not start the background browser.'); return; }
         tick();
-    }).catch(() => { running = false; status.textContent = 'Could not reach Pagehouse.'; });
+    }).catch(() => { running = false; status.textContent = 'Could not reach Quiet Chapters.'; });
 }

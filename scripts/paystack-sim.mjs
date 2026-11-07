@@ -116,8 +116,8 @@ export function createPaystackSimulator({
       // The "phone": every MoMo prompt waiting for approval, refreshed every 2 seconds. Keep it open in a tab.
       if (req.method === 'GET' && url.pathname === '/phone') {
         const waiting = [...transactions.values()].filter(t => t.channel === 'momo' && t.status === 'pending').reverse();
-        const rows = waiting.map(t => `<section><p><b>GHS ${(t.amount / 100).toFixed(2)}</b> to Pagehouse<br><small>${esc(t.phone)} · ${esc(t.provider.toUpperCase())} · ${esc(t.email)}</small></p><form method="post" action="/sim/settle/${t.reference}"><button name="status" value="success">Approve</button><button name="status" value="failed">Decline</button></form></section>`).join('');
-        return html(res, 200, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="2"><title>MoMo phone (simulator)</title><style>body{font:16px system-ui;background:#14201a;color:#fff;margin:0;padding:24px}main{max-width:380px;margin:4vh auto}section{background:#fff;color:#14201a;border-radius:16px;padding:16px 18px;margin:12px 0}button{padding:12px 16px;margin:4px 8px 0 0;border-radius:999px;border:0;cursor:pointer}button[value=success]{background:#1e4a38;color:#fff}</style><main><h1>MoMo phone</h1><p><small>Simulator. No PIN, no real money.</small></p>${rows || '<p>No payment prompts. Pay with Mobile Money in Pagehouse and it appears here.</p>'}</main>`);
+        const rows = waiting.map(t => `<section><p><b>GHS ${(t.amount / 100).toFixed(2)}</b> to Quiet Chapters<br><small>${esc(t.phone)} · ${esc(t.provider.toUpperCase())} · ${esc(t.email)}</small></p><form method="post" action="/sim/settle/${t.reference}"><button name="status" value="success">Approve</button><button name="status" value="failed">Decline</button></form></section>`).join('');
+        return html(res, 200, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="2"><title>MoMo phone (simulator)</title><style>body{font:16px system-ui;background:#14201a;color:#fff;margin:0;padding:24px}main{max-width:380px;margin:4vh auto}section{background:#fff;color:#14201a;border-radius:16px;padding:16px 18px;margin:12px 0}button{padding:12px 16px;margin:4px 8px 0 0;border-radius:999px;border:0;cursor:pointer}button[value=success]{background:#1e4a38;color:#fff}</style><main><h1>MoMo phone</h1><p><small>Simulator. No PIN, no real money.</small></p>${rows || '<p>No payment prompts. Pay with Mobile Money in Quiet Chapters and it appears here.</p>'}</main>`);
       }
 
       if (req.method === 'GET' && (match = url.pathname.match(/^\/(pay|phone)\/(PH-[a-f0-9]{36})$/))) {
@@ -128,7 +128,7 @@ export function createPaystackSimulator({
         const method = match[1] === 'phone' ? 'Mobile Money' : 'Card';
         const body = `<main><h1>Local Paystack simulator</h1><p>${method} checkout for ${esc(transaction.email)}</p><p>Amount: GHS ${(transaction.amount / 100).toFixed(2)}</p><p>Status: ${esc(transaction.status)}</p>${transaction.status === 'pending'
           ? `<form method="post" action="/sim/settle/${transaction.reference}"><button name="status" value="success">Approve ${method} payment</button><button name="status" value="failed">Decline payment</button></form>`
-          : '<p>Payment decision saved. Return to the Pagehouse checkout.</p>'}<p><small>This local simulator does not collect card or mobile-money credentials.</small></p></main>`;
+          : '<p>Payment decision saved. Return to the Quiet Chapters checkout.</p>'}<p><small>This local simulator does not collect card or mobile-money credentials.</small></p></main>`;
         return html(res, 200, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Local Paystack simulator</title><style>body{font:16px system-ui;background:#f4f1eb;color:#25251f;margin:0;padding:24px}main{max-width:560px;margin:8vh auto;background:white;padding:28px;border-radius:12px}button{padding:12px 16px;margin:8px 8px 8px 0;cursor:pointer}</style>${body}`);
       }
 
@@ -154,7 +154,7 @@ export function createPaystackSimulator({
         if (type.includes('application/x-www-form-urlencoded')) {
           if (transaction.channel === 'card' && backTo(transaction)) { res.writeHead(303, { Location: backTo(transaction), 'Cache-Control': 'no-store' }); return res.end(); }
           if (transaction.channel === 'momo') { res.writeHead(303, { Location: '/phone', 'Cache-Control': 'no-store' }); return res.end(); }
-          return html(res, 200, `<!doctype html><meta charset="utf-8"><title>Payment decision</title><main><h1>${body.status === 'success' ? 'Payment approved' : 'Payment declined'}</h1><p>${webhook.delivered ? 'Signed webhook delivered.' : `Webhook not delivered: ${esc(webhook.error || webhook.status)}`}</p><p>You can return to Pagehouse.</p></main>`);
+          return html(res, 200, `<!doctype html><meta charset="utf-8"><title>Payment decision</title><main><h1>${body.status === 'success' ? 'Payment approved' : 'Payment declined'}</h1><p>${webhook.delivered ? 'Signed webhook delivered.' : `Webhook not delivered: ${esc(webhook.error || webhook.status)}`}</p><p>You can return to Quiet Chapters.</p></main>`);
         }
         return json(res, 200, { status: transaction.status, webhook });
       }

@@ -116,8 +116,8 @@ export function registrationOptions(rp, current) {
   return {
     challengeId: id,
     publicKey: {
-      challenge, rp: { id: rp.id, name: 'Pagehouse' },
-      user: { id: webauthn.b64u(Buffer.from(libraryId)), name: 'Pagehouse Library', displayName: 'Pagehouse Library' },
+      challenge, rp: { id: rp.id, name: 'Quiet Chapters' },
+      user: { id: webauthn.b64u(Buffer.from(libraryId)), name: 'Quiet Chapters Library', displayName: 'Quiet Chapters Library' },
       pubKeyCredParams: [{ type: 'public-key', alg: webauthn.ALG_ES256 }, { type: 'public-key', alg: webauthn.ALG_EDDSA }, { type: 'public-key', alg: webauthn.ALG_RS256 }],
       authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
       attestation: 'none', timeout: CHALLENGE_MS, excludeCredentials: exclude,
@@ -152,7 +152,7 @@ export function finishLogin(challengeId, credential) {
   const entry = takeChallenge(challengeId, 'get');
   const credentialId = typeof credential?.id === 'string' ? credential.id : '';
   const stored = db.prepare('SELECT * FROM library_passkeys WHERE credential_id=?').get(credentialId);
-  if (!stored) throw Object.assign(new Error('This passkey is not saved with Pagehouse'), { statusCode: 401 });
+  if (!stored) throw Object.assign(new Error('This passkey is not saved with Quiet Chapters'), { statusCode: 401 });
   const { signCount } = webauthn.verifyAssertion(credential, { ...entry, publicKey: stored.public_key, alg: stored.alg, signCount: stored.sign_count });
   // The credential id and its verified signature decide the Library. The user handle the phone sends back was
   // fixed when the passkey was made, so after a merge it still names the Library that was merged away.

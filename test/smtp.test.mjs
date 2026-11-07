@@ -65,8 +65,8 @@ function fakeServer(opts = {}) {
   return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, log, close: () => server.close() })));
 }
 
-const from = { email: 'books@example.test', name: 'Pagehouse' };
-const mail = extra => ({ host: '127.0.0.1', from, to: { email: 'ama@example.test', name: 'Ama Mensah' }, subject: 'Found it: “Arrow of God” is on Pagehouse',
+const from = { email: 'books@example.test', name: 'Quiet Chapters' };
+const mail = extra => ({ host: '127.0.0.1', from, to: { email: 'ama@example.test', name: 'Ama Mensah' }, subject: 'Found it: “Arrow of God” is on Quiet Chapters',
   text: 'Plain body\n.leading dot line', html: '<p>Hello</p>', messageId: 'abc@example.test', headers: { 'X-Pagehouse-Message': 'abc' }, timeoutMs: 5000, ...extra });
 const decodeParts = raw => [...raw.matchAll(/Content-Type: text\/(plain|html); charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n([A-Za-z0-9+/=\r\n]+?)\r\n--/g)]
   .map(m => [m[1], Buffer.from(m[2].replace(/\r\n/g, ''), 'base64').toString()]);
@@ -82,11 +82,11 @@ try {
   assert.ok(s.log.authed);
   assert.deepEqual(s.log.commands.filter(c => /^(MAIL|RCPT|DATA)/.test(c)), ['MAIL FROM:<books@example.test>', 'RCPT TO:<ama@example.test>', 'DATA']);
   const raw = s.log.messages[0];
-  assert.match(raw, /^From: "Pagehouse" <books@example\.test>\r\n/m);
+  assert.match(raw, /^From: "Quiet Chapters" <books@example\.test>\r\n/m);
   assert.match(raw, /^To: "Ama Mensah" <ama@example\.test>\r\n/m);
   assert.match(raw, /^Subject: =\?UTF-8\?B\?/m, 'non-ASCII subject is an encoded word');
   const subjectWords = raw.match(/^Subject: ((?:.*\r\n )*.*)\r\n/m)[1].split('\r\n ').map(w => w.match(/=\?UTF-8\?B\?(.*)\?=/)[1]);
-  assert.equal(subjectWords.map(w => Buffer.from(w, 'base64').toString()).join(''), 'Found it: “Arrow of God” is on Pagehouse');
+  assert.equal(subjectWords.map(w => Buffer.from(w, 'base64').toString()).join(''), 'Found it: “Arrow of God” is on Quiet Chapters');
   assert.ok(subjectWords.every(w => w.length + 12 <= 75), 'encoded words stay within 75 characters');
   assert.match(raw, /^Message-ID: <abc@example\.test>\r\n/m);
   assert.match(raw, /^X-Pagehouse-Message: abc\r\n/m);

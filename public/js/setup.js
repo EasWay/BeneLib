@@ -76,7 +76,7 @@ function stepHtml() {
         }[t];
         return `<div class="sstep" data-step>
         <div><h1>Got <span class="serif" style="color:var(--accent)">qBittorrent?</span></h1>
-        <p class="lede" style="margin-top:8px">Optional. eBooks download on their own. Audiobooks usually come as magnet links, and qBittorrent can fetch those. Pagehouse will rename and shelve what it brings back.</p></div>
+        <p class="lede" style="margin-top:8px">Optional. eBooks download on their own. Audiobooks usually come as magnet links, and qBittorrent can fetch those. Quiet Chapters will rename and shelve what it brings back.</p></div>
         <button type="button" class="bigswitch" role="switch" aria-checked="${s.qb}" data-act="qb">Yes, connect qBittorrent<span class="switch" aria-checked="${s.qb}" aria-hidden="true"></span></button>
         ${s.qb ? `<div class="reveal" style="display:flex;flex-direction:column;gap:16px">
             <div class="qbstat" id="qbstat"><span class="qt"><b style="${t === 'found' ? 'color:var(--accent)' : t === 'failed' ? 'color:var(--red)' : ''}" aria-live="polite">${esc(view[0])}</b><span>${esc(view[1])}</span></span>
@@ -86,7 +86,7 @@ function stepHtml() {
                 <label class="field">Web UI address<input class="input mono" data-k="qbUrl" value="${esc(s.qbUrl)}" spellcheck="false"></label>
                 <div class="fields"><label class="field">Username<input class="input" data-k="qbUser" value="${esc(s.qbUser)}" autocomplete="off"></label>
                 <label class="field">Password<input class="input" type="password" data-k="qbPass" value="${esc(s.qbPass)}" autocomplete="off"></label></div></div>` : ''}
-            <p class="desc" style="margin:0;font-size:14px;line-height:1.55">Pagehouse has to see qBittorrent's finished files to rename them, so share the downloads folder between both containers, for example <span class="mono" style="font-size:13px;color:var(--paper)">/srv/downloads:/downloads</span>.</p>
+            <p class="desc" style="margin:0;font-size:14px;line-height:1.55">Quiet Chapters has to see qBittorrent's finished files to rename them, so share the downloads folder between both containers, for example <span class="mono" style="font-size:13px;color:var(--paper)">/srv/downloads:/downloads</span>.</p>
         </div>` : ''}
         </div>`;
     }
@@ -106,7 +106,7 @@ function stepHtml() {
 function draw(first) {
     const s = st;
     root.innerHTML = `<div class="setup">
-        <div class="ph-lockup"><span class="ph-mark" aria-hidden="true">Ph</span><span>Pagehouse</span></div>
+        <div class="ph-lockup"><span class="ph-mark" aria-hidden="true">QC</span><span>Quiet Chapters</span></div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
             <div class="sbars" aria-hidden="true">${COLOURS.map((c, i) => `<span data-bar="${i + 1}" style="height:${HEIGHTS[i]}px;${s.step > i ? 'background:' + c : ''}"></span>`).join('')}</div>
             <span class="label" style="font-size:13px;color:var(--text2)">First run · step ${s.step} of 4</span></div>

@@ -65,13 +65,13 @@ function badges() {
     const s = app.status || {}, on = app.settings ? app.settings.system.badges : true;
     return { shelf: on && s.active ? s.active : 0, settings: on && s.attention ? s.attention : 0 };
 }
-const TITLES = { '/results': 'Results', '/shelf': 'Shelf', '/shelf/stats': 'Stats', '/settings': 'Settings', '/admin': 'Admin panel', '/pagehouse.html': 'Pagehouse Store' };
+const TITLES = { '/results': 'Results', '/shelf': 'Shelf', '/shelf/stats': 'Stats', '/settings': 'Settings', '/admin': 'Admin panel', '/pagehouse.html': 'Quiet Chapters' };
 export function drawNav(path = location.pathname) {
-    document.title = path === '/' ? 'Pagehouse' : (TITLES[path] ? TITLES[path] + ' · ' : '') + 'Pagehouse';
+    document.title = path === '/' ? 'Quiet Chapters' : (TITLES[path] ? TITLES[path] + ' · ' : '') + 'Quiet Chapters';
     const b = badges();
     const top = $('#topnav'), bar = $('#tabbar');
     patchHtml(top, `<nav aria-label="Main">
-        <a class="nv lg" href="${esc(app.lastResults || '/')}" data-nav="discover" title="Pagehouse, back to Browse" aria-label="Pagehouse, back to Browse"><span class="ph-mark" aria-hidden="true">Ph</span><span class="nl">Pagehouse</span></a>
+        <a class="nv lg" href="${esc(app.lastResults || '/')}" data-nav="discover" title="Quiet Chapters, back to Browse" aria-label="Quiet Chapters, back to Browse"><span class="ph-mark" aria-hidden="true">QC</span><span class="nl">Quiet Chapters</span></a>
         <span class="navsep" aria-hidden="true"></span>
         ${TABS.map(([href, label, ic]) => {
             const on = tabOn(path, href);
@@ -151,8 +151,8 @@ function notify(ev) {
     if (!text || (!document.hidden && ev.type === 'done')) return;
     const opts = { body: text, icon: '/img/favicon.png', tag: ev.type + (ev.jobId || '') };
     // Phones only show notifications through the service worker; desktops can use either.
-    if (swReg) { swReg.showNotification('Pagehouse', opts).catch(() => {}); return; }
-    try { const note = new Notification('Pagehouse', opts); note.onclick = () => { focus(); go('/shelf'); note.close(); }; }
+    if (swReg) { swReg.showNotification('Quiet Chapters', opts).catch(() => {}); return; }
+    try { const note = new Notification('Quiet Chapters', opts); note.onclick = () => { focus(); go('/shelf'); note.close(); }; }
     catch (e) { /* no notifications here */ }
 }
 
@@ -163,9 +163,9 @@ export function login({ asAdmin = false } = {}) {
     showChrome(false);
     setBg('var(--glow-home)');
     const mode = app.session.mode;
-    const lede = asAdmin ? 'For the person who runs this Pagehouse server.' : mode === 'family' ? 'Use the account you were given.' : 'This Pagehouse server asks for a password.';
+    const lede = asAdmin ? 'For the person who runs this Quiet Chapters server.' : mode === 'family' ? 'Use the account you were given.' : 'This Quiet Chapters server asks for a password.';
     root.innerHTML = `<div class="gate">
-        <div class="ph-lockup"><span class="ph-mark" aria-hidden="true">Ph</span><span>Pagehouse</span></div>
+        <div class="ph-lockup"><span class="ph-mark" aria-hidden="true">QC</span><span>Quiet Chapters</span></div>
         <form class="gate-card" id="login">
             <h1 class="h-sec">${asAdmin ? 'Admin' : 'Sign'} <span class="serif" style="color:var(--yellow)">${asAdmin ? 'sign-in' : 'in'}</span></h1>
             <p class="lede">${lede}</p>
@@ -189,7 +189,7 @@ export function login({ asAdmin = false } = {}) {
 
 async function boot() {
     try { app.session = await api('/api/session'); }
-    catch (e) { root.innerHTML = `<div class="gate"><p class="lede">${esc(/fetch|network/i.test(e.message) ? 'Pagehouse is not answering. Is the server running?' : e.message)}</p></div>`; return; }
+    catch (e) { root.innerHTML = `<div class="gate"><p class="lede">${esc(/fetch|network/i.test(e.message) ? 'Quiet Chapters is not answering. Is the server running?' : e.message)}</p></div>`; return; }
     if (!app.session.signedIn) return login();
     if (!app.session.setupDone) {
         showChrome(false);

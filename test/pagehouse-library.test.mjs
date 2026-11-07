@@ -105,7 +105,7 @@ try {
   failLogin({ counter: 1 }, /cloned/);
   const stranger = new Authenticator();
   const so = library.loginOptions(rp);
-  assert.throws(() => library.finishLogin(so.challengeId, stranger.get(so, rp.origin, userHandle(regOpts))), /not saved with Pagehouse/);
+  assert.throws(() => library.finishLogin(so.challengeId, stranger.get(so, rp.origin, userHandle(regOpts))), /not saved with Quiet Chapters/);
 
   // A second passkey (Ed25519, synced: counter 0) joins the same Library; the first is excluded from re-adding.
   const laptop = new Authenticator('ed25519');

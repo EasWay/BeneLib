@@ -12,7 +12,7 @@ process.env.PAYSTACK_SECRET_KEY = 'sk_test_no_real_payment';
 process.env.PAGEHOUSE_PUBLIC_URL = 'https://store.example.test/';
 process.env.PAGEHOUSE_OWNER_EMAIL = 'owner@example.test';
 delete process.env.SMTP_HOST;
-process.env.PAGEHOUSE_EMAIL_FROM = 'Pagehouse <books@example.test>';
+process.env.PAGEHOUSE_EMAIL_FROM = 'Quiet Chapters <books@example.test>';
 const catalog = await import('../src/pagehouse.js');
 catalog.saveRightsPolicy({ license: 'CC BY 4.0', rightsScope: 'commercial redistribution', rightsEvidence: 'Test fixture license', confirmUniversalRights: true });
 catalog.saveSourceLicence('catalog', { licensor: 'Test Press', licence: 'Test agreement', rightsScope: 'Test scope', evidence: 'Test fixture', permitsSale: true, permitsRedistribution: true, confirm: true });
@@ -52,7 +52,7 @@ try {
   // Gmail: sender defaults to the signed-in account; App Password spaces are dropped (other hosts keep them).
   const savedFrom = process.env.PAGEHOUSE_EMAIL_FROM; delete process.env.PAGEHOUSE_EMAIL_FROM;
   Object.assign(process.env, { SMTP_HOST: 'smtp.gmail.com', SMTP_USER: 'pagehouse.store@gmail.com', SMTP_PASS: 'abcd efgh ijkl mnop' });
-  assert.deepEqual(email.emailConfig().from, { email: 'pagehouse.store@gmail.com', name: 'Pagehouse' });
+  assert.deepEqual(email.emailConfig().from, { email: 'pagehouse.store@gmail.com', name: 'Quiet Chapters' });
   assert.equal(email.emailConfig().smtp.pass, 'abcdefghijklmnop');
   assert.equal(email.emailConfig().smtp.port, 587);
   assert.equal(email.outboxStatus().problem, '');
@@ -73,7 +73,7 @@ try {
   // Configured: the queue drains through Brevo with sender, recipient and both bodies.
   process.env.SMTP_HOST = '127.0.0.1'; process.env.SMTP_SECURE = 'none';
   assert.deepEqual(await email.processOutbox({ transport }), { sent: 2, failed: 0, retrying: 0, waiting: 0 });
-  assert.deepEqual(sent[0].from, { email: 'books@example.test', name: 'Pagehouse' });
+  assert.deepEqual(sent[0].from, { email: 'books@example.test', name: 'Quiet Chapters' });
   assert.equal(sent[0].to, 'ama@example.test'); assert.equal(sent[0].toName, 'Ama');
   assert.ok(sent[0].html && sent[0].text && sent[0].subject.includes('Arrow of'));
   assert.deepEqual(kinds(), ['request-received', 'owner-request']);

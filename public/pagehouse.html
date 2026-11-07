@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
-<title>Pagehouse Store</title>
-<meta name="description" content="Browse and discover books from the Pagehouse catalogue.">
+<title>Quiet Chapters</title>
+<meta name="description" content="Browse and discover books from the Quiet Chapters catalogue.">
 <meta name="theme-color" content="#0D1210">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -443,7 +443,7 @@ footer .base{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:space-
 
 <header class="top" id="top">
   <div class="wrap">
-    <a class="brand" href="/" aria-label="Pagehouse Store, back to the library"><span class="mono-mark" aria-hidden="true">Ph</span>Pagehouse</a>
+    <a class="brand" href="/" aria-label="Quiet Chapters, back to the library"><span class="mono-mark" aria-hidden="true">QC</span>Quiet Chapters</a>
     <nav class="links" aria-label="Main">
       <a href="#store">Shelves</a><a href="#categories">Categories</a><a href="#library">Library</a><a href="#request">Requests</a>
     </nav>
@@ -461,9 +461,9 @@ footer .base{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:space-
     <div class="beats">
       <div class="beat" data-a="0" data-b=".2">
         <div class="wrap"><div class="in">
-          <span class="eyebrow">Pagehouse · Accra</span>
+          <span class="eyebrow">Quiet Chapters · Accra</span>
           <h1>Books worth keeping, for <em>five cedis.</em></h1>
-          <p>Enduring stories, ideas about society and self, and clear introductions to essential subjects, selected from the Pagehouse catalogue.</p>
+          <p>Enduring stories, ideas about society and self, and clear introductions to essential subjects, selected from the Quiet Chapters catalogue.</p>
           <div class="ctas"><a class="btn light" href="#store">Browse the shelves</a><a class="btn line" href="#request">Request a book</a></div>
         </div></div>
       </div>
@@ -496,7 +496,7 @@ footer .base{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:space-
   </div>
 </section>
 
-<section class="facts" aria-label="Why Pagehouse">
+<section class="facts" aria-label="Why Quiet Chapters">
   <div class="wrap">
     <div class="fact"><b>Clear catalogue pricing</b><span>Price is shown before checkout</span></div>
     <div class="fact"><b>GH₵ 5, every book</b><span>One clear price across the collection</span></div>
@@ -662,11 +662,11 @@ footer .base{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:space-
 
 <footer>
   <div class="wrap">
-    <div><a class="brand" href="#"><span class="mono-mark" aria-hidden="true">Ph</span>Pagehouse</a><p style="margin:0;max-width:30ch;font-size:14px">Low-cost PDF books for readers in Ghana. Every title GH₵ 5.</p></div>
+    <div><a class="brand" href="#"><span class="mono-mark" aria-hidden="true">QC</span>Quiet Chapters</a><p style="margin:0;max-width:30ch;font-size:14px">Low-cost PDF books for readers in Ghana. Every title GH₵ 5.</p></div>
     <div><h4>Store</h4><ul><li><a href="#store">Shelves</a></li><li><a href="#categories">Categories</a></li><li><a href="#checkout">Bag</a></li></ul></div>
     <div><h4>Help</h4><ul><li><a href="#how">How it works</a></li><li><a href="#request">Request a book</a></li><li><a href="#how">Delivery and refunds</a></li></ul></div>
     <div><h4>Legal</h4><ul><li><a href="#">Terms of Sale</a></li><li><a href="#">Privacy Policy</a></li><li><a href="#">Data protection (Act 843)</a></li></ul></div>
-    <div class="base"><span>© 2026 Pagehouse · Accra, Ghana</span><span>Books worth keeping, for every curious mind.</span></div>
+    <div class="base"><span>© 2026 Quiet Chapters · Accra, Ghana</span><span>Books worth keeping, for every curious mind.</span></div>
   </div>
 </footer>
 
@@ -711,7 +711,7 @@ var CATS = {
 var books = [], byId = Object.create(null), shelves = [], catalogById = Object.create(null);
 var sourceResults=[],sourceSearchState='idle',sourceSearchQuery='',sourceSearchError='';
 var coverImages=Object.create(null);
-var placeholder = {id:'pagehouse-featured',t:'Open books, ready to read',a:'Pagehouse · Accra',y:2026,c:'identity',s:['Pagehouse','Open-licence catalogue'],bg:'#1F3B2D',fg:'#EEEAE2',d:'Discover books in the Pagehouse catalogue.'};
+var placeholder = {id:'pagehouse-featured',t:'Open books, ready to read',a:'Quiet Chapters · Accra',y:2026,c:'identity',s:['Quiet Chapters','Open-licence catalogue'],bg:'#1F3B2D',fg:'#EEEAE2',d:'Discover books in the Quiet Chapters catalogue.'};
 var heroBook = placeholder;
 var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
 var yr = function(y){ return y == null || y === '' ? 'Year not listed' : Number(y) < 0 ? (-Number(y)) + ' BC' : String(y); };
@@ -745,7 +745,7 @@ function coverImageFor(book){
 }
 function fromApi(x){
   var c = categoryFor(x), colors = {identity:['#1F3B2D','#EFE9DC'],society:['#9A5B2C','#FBF1E6'],mind:['#4E3360','#F3EEF6'],learning:['#22385A','#EAF0F8'],stories:['#6E2A1C','#F4E9E1']}[c];
-  var book={id:String(x.id),t:String(x.title || 'Untitled'),a:String(x.authors || 'Author unknown'),y:x.publishedYear,c:c,s:[],bg:colors[0],fg:colors[1],d:String(x.description || 'A book in the Pagehouse catalogue.'),priceMinor:Number(x.priceMinor)||0,currency:String(x.currency||'GHS'),fileStatus:String(x.fileStatus||'ready'),canPurchase:x.canPurchase!==false,format:String(x.format||''),subjects:Array.isArray(x.subjects)?x.subjects:[],coverUrl:String(x.coverUrl||'')};
+  var book={id:String(x.id),t:String(x.title || 'Untitled'),a:String(x.authors || 'Author unknown'),y:x.publishedYear,c:c,s:[],bg:colors[0],fg:colors[1],d:String(x.description || 'A book in the Quiet Chapters catalogue.'),priceMinor:Number(x.priceMinor)||0,currency:String(x.currency||'GHS'),fileStatus:String(x.fileStatus||'ready'),canPurchase:x.canPurchase!==false,format:String(x.format||''),subjects:Array.isArray(x.subjects)?x.subjects:[],coverUrl:String(x.coverUrl||'')};
   if(book.coverUrl)coverImageFor(book);
   return book;
 }
@@ -1080,7 +1080,7 @@ async function api(path,body){
 function libError(text){var el=document.getElementById('libErr');el.textContent=text;el.hidden=!text;}
 function passkeyError(err){
   if(err&&(err.name==='NotAllowedError'||err.name==='AbortError'))return 'Cancelled. Try again when you’re ready.';
-  if(err&&err.name==='InvalidStateError')return 'This device already has a Pagehouse key. Use Open instead.';
+  if(err&&err.name==='InvalidStateError')return 'This device already has a Quiet Chapters key. Use Open instead.';
   return (err&&err.message)||'That didn’t work. Try again.';
 }
 async function createKey(){
@@ -1106,7 +1106,7 @@ async function openKey(){
     var view=await api('/api/store/library/passkeys/login',{challengeId:o.challengeId,credential:{id:cred.id,type:cred.type,
       response:{clientDataJSON:b64u.to(r.clientDataJSON),authenticatorData:b64u.to(r.authenticatorData),signature:b64u.to(r.signature),userHandle:r.userHandle?b64u.to(r.userHandle):null}}});
     renderLibrary(view);
-  }catch(err){libError(err.status===401?'No Pagehouse key on this device yet. Create one first.':passkeyError(err));}
+  }catch(err){libError(err.status===401?'No Quiet Chapters key on this device yet. Create one first.':passkeyError(err));}
 }
 function offerPasskey(){
   var el=document.getElementById('downloadLinks');
@@ -1341,9 +1341,9 @@ function paintCover(b, rough){
   lines.forEach(function(l, i){ x.fillText(l, 136, y + i * lh); });
   x.fillRect(140, TH - 268, 150, 3);
   x.fillStyle = rough ? '#3a3a3a' : (dark ? 'rgba(239,233,220,.7)' : b.fg);
-  x.font = '500 24px "Geist Mono", monospace'; spaced(x, 'PAGEHOUSE EDITION', 140, TH - 190, 8);
+  x.font = '500 24px "Geist Mono", monospace'; spaced(x, 'QUIET CHAPTERS EDITION', 140, TH - 190, 8);
   x.strokeStyle = x.fillStyle; x.lineWidth = 2.5; x.beginPath(); x.arc(TW - 190, TH - 200, 34, 0, Math.PI * 2); x.stroke();
-  x.font = 'italic 400 34px Newsreader, Georgia, serif'; x.textAlign = 'center'; x.fillText('Ph', TW - 190, TH - 189); x.textAlign = 'left';
+  x.font = 'italic 400 34px Newsreader, Georgia, serif'; x.textAlign = 'center'; x.fillText('QC', TW - 190, TH - 189); x.textAlign = 'left';
   return c;
 }
 function paper(x, w, h, spineRight){
@@ -1377,11 +1377,11 @@ function paintPage(kind, b){
     var titleTop=620-(ls.length-1)*titleLineHeight/2;
     ls.forEach(function(l, i){ y.fillText(l, mid, titleTop+i*titleLineHeight); });
     y.fillStyle = '#B08A50'; y.fillRect(mid - 60, titleTop+ls.length*titleLineHeight-8, 120, 3);
-    y.fillStyle = '#6B5A44'; y.font = 'italic 400 34px Newsreader, Georgia, serif'; y.fillText('The Pagehouse Edition', mid, titleTop+ls.length*titleLineHeight+92);
+    y.fillStyle = '#6B5A44'; y.font = 'italic 400 34px Newsreader, Georgia, serif'; y.fillText('The Quiet Chapters Edition', mid, titleTop+ls.length*titleLineHeight+92);
     y.font = '500 22px "Geist Mono", monospace'; y.fillText('ACCRA · 2026', mid, TH - 170);
   } else if (kind === 'edition-back') {
     y.textAlign = 'left'; y.fillStyle = '#6B5A44'; y.font = '400 27px Newsreader, Georgia, serif';
-    [b.t, 'by ' + b.a, '', 'First published ' + yr(b.y) + '.', '', 'This edition typeset by Pagehouse,', 'Accra, Ghana, 2026.'].forEach(function(l, i){ y.fillText(l, L, TH - 560 + i * 40); });
+    [b.t, 'by ' + b.a, '', 'First published ' + yr(b.y) + '.', '', 'This edition typeset by Quiet Chapters,', 'Accra, Ghana, 2026.'].forEach(function(l, i){ y.fillText(l, L, TH - 560 + i * 40); });
   } else if (kind === 'chapter') {
     y.fillStyle = '#6B5A44'; y.font = '500 24px "Geist Mono", monospace'; y.fillText('CHAPTER ONE', mid, 330);
     y.fillStyle = '#2B2118'; y.font = '400 120px Newsreader, Georgia, serif'; y.fillText('I', mid, 470);
