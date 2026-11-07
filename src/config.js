@@ -4,10 +4,30 @@
 // Settings are one object of sections. DEFAULTS is the schema: a patch may only set keys that exist
 // there, with the same type. SECRET keys are write-only, the page never gets them back.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_TEMPLATES, primaryAuthor } from './rename.js';
 
-export const DATA = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+function resolveDataDir() {
+    if (process.env.DATA_DIR) return process.env.DATA_DIR;
+    const candidate = path.join(process.cwd(), 'data');
+    if (process.env.VERCEL || process.cwd().startsWith('/var/task')) {
+        const tmp = path.join(os.tmpdir(), 'benelib-data');
+        try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
+        return tmp;
+    }
+    try {
+        fs.mkdirSync(candidate, { recursive: true });
+        fs.accessSync(candidate, fs.constants.W_OK);
+        return candidate;
+    } catch {
+        const tmp = path.join(os.tmpdir(), 'benelib-data');
+        try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
+        return tmp;
+    }
+}
+
+export const DATA = resolveDataDir();
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
 const STATS_FILE = path.join(DATA, 'stats.json');
 
@@ -178,7 +198,7 @@ export function writeJson(file, obj) {
 export const saveSettings = () => writeJson(SETTINGS_FILE, settings);
 
 // PUBLIC_INSTANCE=1 fixes the mode to public, whatever is saved.
-export const publicForced = () => process.env.PUBLIC_INSTANCE === '1';
+export const publicForced = () => process.env.PUBLIC_INSTANCE === '1' || Boolean(process.env.VERCEL);
 export const accessMode = () => (publicForced() ? 'public' : ['private', 'public', 'family'].includes(settings.access.mode) ? settings.access.mode : 'private');
 export const isPublic = () => accessMode() === 'public';
 

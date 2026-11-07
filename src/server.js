@@ -884,6 +884,25 @@ function frontendCorsHeaders(req) {
     };
 }
 
+let initialHydration = null;
+function ensureHydrated() {
+    if (!supabaseConfigured()) return Promise.resolve();
+    if (!initialHydration) {
+        const localBooks = pagehouse.catalogStats().total || 0;
+        if (localBooks === 0) {
+            initialHydration = pullDatabaseFromSupabase(pagehouse.db)
+                .then(r => console.log(`[supabase] hydrated ${r.hydrated} rows from Supabase`))
+                .catch(e => console.warn('[supabase] initial pull failed:', e.message));
+        } else {
+            initialHydration = Promise.resolve();
+            pushDatabaseToSupabase(pagehouse.db)
+                .then(r => console.log('[supabase] synced local database to Supabase:', JSON.stringify(r.tables)))
+                .catch(e => console.warn('[supabase] initial push failed:', e.message));
+        }
+    }
+    return initialHydration;
+}
+
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname;
@@ -894,6 +913,9 @@ const server = http.createServer(async (req, res) => {
     }
     try {
         if (p === '/health') { res.writeHead(200).end('ok'); return; }
+        if (p.startsWith('/api/store') || p.startsWith('/dl/store') || p === '/webhooks/paystack') {
+            await ensureHydrated();
+        }
         if (p === '/webhooks/paystack' && req.method === 'POST') {
             try {
                 const raw = await body(req, 1e6);
@@ -1066,20 +1088,11 @@ server.on('error', e => {
 
 server.listen(PORT, () => {
     console.log(`RaveBSD ${VERSION} listening on :${PORT}`);
-    ensureBrowser().catch(() => {});
+    if (!process.env.VERCEL) ensureBrowser().catch(() => {});
     if (settings.vpn.enabled) checkVpn();
     refreshSlum();
     if (supabaseConfigured()) {
-        const localBooks = pagehouse.catalogStats().total || 0;
-        if (localBooks === 0) {
-            pullDatabaseFromSupabase(pagehouse.db)
-                .then(r => console.log(`[supabase] hydrated ${r.hydrated} rows from Supabase PostgreSQL`))
-                .catch(e => console.warn('[supabase] initial pull failed:', e.message));
-        } else {
-            pushDatabaseToSupabase(pagehouse.db)
-                .then(r => console.log('[supabase] synced local database to Supabase:', JSON.stringify(r.tables)))
-                .catch(e => console.warn('[supabase] initial push failed:', e.message));
-        }
+        ensureHydrated();
         setInterval(() => {
             pushDatabaseToSupabase(pagehouse.db).catch(() => {});
         }, 5 * 60e3).unref();

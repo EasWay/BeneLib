@@ -41,6 +41,9 @@ db.exec(`
 // The cookie signing key: PAGEHOUSE_LIBRARY_SECRET, else a random key kept in the data folder.
 const KEY_FILE = path.join(DATA, 'pagehouse-library.key');
 let secret = process.env.PAGEHOUSE_LIBRARY_SECRET || '';
+if (!secret && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PAYSTACK_SECRET_KEY)) {
+  secret = crypto.createHash('sha256').update('pagehouse-library:' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PAYSTACK_SECRET_KEY)).digest('base64url');
+}
 if (!secret) {
   try { secret = fs.readFileSync(KEY_FILE, 'utf8').trim(); }
   catch {

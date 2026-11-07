@@ -124,10 +124,21 @@ const TABLES = [
   { name: 'email_outbox', conflict: 'id' },
 ];
 
+const LIVE_ORDER_TABLES = [
+  'libraries',
+  'library_passkeys',
+  'store_orders',
+  'store_order_items',
+  'store_download_sessions',
+  'store_payment_events',
+  'book_requests',
+];
+
 export async function upsertRows(table, rows, onConflict = 'id', fetchImpl = fetch) {
   if (!supabaseConfigured() || !Array.isArray(rows) || !rows.length) return { synced: 0 };
   const batchSize = 250;
   let synced = 0;
+  let missingTable = false;
   for (let i = 0; i < rows.length; i += batchSize) {
     const chunk = rows.slice(i, i + batchSize);
     try {
@@ -142,10 +153,26 @@ export async function upsertRows(table, rows, onConflict = 'id', fetchImpl = fet
         signal: AbortSignal.timeout(20000),
       });
       if (res.ok) synced += chunk.length;
-      else if (res.status === 404) break;
+      else if (res.status === 404) { missingTable = true; break; }
     } catch {
       // Soft fail so live checkout/download traffic is never interrupted
     }
+  }
+  if (missingTable && LIVE_ORDER_TABLES.includes(table)) {
+    try {
+      let existing = {};
+      const curBuf = await downloadStorageObject('_snapshots/pagehouse-orders.json', fetchImpl);
+      if (curBuf) {
+        try { existing = JSON.parse(curBuf.toString('utf8')) || {}; } catch {}
+      }
+      const list = Array.isArray(existing[table]) ? existing[table] : [];
+      const keys = onConflict.split(',').map(s => s.trim()).filter(Boolean);
+      const keyOf = r => keys.map(k => String(r?.[k] ?? '')).join('|');
+      const map = new Map(list.map(r => [keyOf(r), r]));
+      for (const r of rows) map.set(keyOf(r), { ...r });
+      existing[table] = [...map.values()];
+      await uploadStorageObject('_snapshots/pagehouse-orders.json', Buffer.from(JSON.stringify(existing), 'utf8'), 'application/json', fetchImpl);
+    } catch {}
   }
   return { synced };
 }
@@ -240,6 +267,28 @@ export async function pullDatabaseFromSupabase(db, fetchImpl = fetch) {
         const dump = JSON.parse(snapBuf.toString('utf8'));
         for (const { name } of TABLES) {
           const rows = dump?.[name];
+          if (!Array.isArray(rows) || !rows.length) continue;
+          const cols = Object.keys(rows[0]);
+          const placeholders = cols.map(() => '?').join(',');
+          const updates = cols.map(c => `${c}=excluded.${c}`).join(',');
+          const stmt = db.prepare(`INSERT INTO ${name} (${cols.join(',')}) VALUES (${placeholders}) ON CONFLICT DO UPDATE SET ${updates}`);
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            for (const r of rows) {
+              stmt.run(...cols.map(c => r[c] ?? null));
+              totalHydrated++;
+            }
+            db.exec('COMMIT');
+          } catch {
+            db.exec('ROLLBACK');
+          }
+        }
+      }
+      const ordersBuf = await downloadStorageObject('_snapshots/pagehouse-orders.json', fetchImpl);
+      if (ordersBuf) {
+        const ordDump = JSON.parse(ordersBuf.toString('utf8'));
+        for (const name of LIVE_ORDER_TABLES) {
+          const rows = ordDump?.[name];
           if (!Array.isArray(rows) || !rows.length) continue;
           const cols = Object.keys(rows[0]);
           const placeholders = cols.map(() => '?').join(',');

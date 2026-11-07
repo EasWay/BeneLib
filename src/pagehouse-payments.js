@@ -15,6 +15,9 @@ fs.mkdirSync(FILES_DIR, { recursive: true });
 const TOKEN_KEY_FILE = path.join(DATA, 'pagehouse-token.key');
 fs.mkdirSync(DATA, { recursive: true });
 let tokenSecret = process.env.PAGEHOUSE_TOKEN_SECRET || '';
+if (!tokenSecret && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PAYSTACK_SECRET_KEY)) {
+  tokenSecret = crypto.createHash('sha256').update('pagehouse-token:' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PAYSTACK_SECRET_KEY)).digest('base64url');
+}
 if (!tokenSecret) {
   try { tokenSecret = fs.readFileSync(TOKEN_KEY_FILE, 'utf8').trim(); }
   catch {
