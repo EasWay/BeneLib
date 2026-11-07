@@ -21,7 +21,7 @@ COPY supabase ./supabase
 # BUILD_ID is the git commit, passed in by the publish workflow. It is shown in the admin panel under System.
 ARG BUILD_ID=""
 # HOME=/tmp: with PUID/PGID set to a user the image does not know, HOME would be /, which the browser cannot write to.
-ENV NODE_ENV=production PORT=8080 DATA_DIR=/data BOOKS_DIR=/books AUDIOBOOKS_DIR=/audiobooks BROWSER_IN_CONTAINER=1 PUBLIC_INSTANCE=1 TRUST_PROXY=1 BUILD_ID=$BUILD_ID HOME=/tmp
+ENV NODE_ENV=production PORT=8080 DATA_DIR=/data BOOKS_DIR=/books AUDIOBOOKS_DIR=/audiobooks BROWSER_IN_CONTAINER=1 PUBLIC_INSTANCE=1 TRUST_PROXY=1 ALLOWED_HOSTS=quietchapters.up.railway.app BUILD_ID=$BUILD_ID HOME=/tmp
 # /data holds settings and the shelf list, /books and /audiobooks hold the files, /downloads is shared with qBittorrent.
 RUN mkdir -p /data /books /audiobooks /downloads && chown -R node:node /data /books /audiobooks /downloads
 USER node

@@ -1,4 +1,38 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "version": 2
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://quietchapters.up.railway.app/api/:path*"
+    },
+    {
+      "source": "/dl/:path*",
+      "destination": "https://quietchapters.up.railway.app/dl/:path*"
+    },
+    {
+      "source": "/cover",
+      "destination": "https://quietchapters.up.railway.app/cover"
+    },
+    {
+      "source": "/events",
+      "destination": "https://quietchapters.up.railway.app/events"
+    },
+    {
+      "source": "/files/:path*",
+      "destination": "https://quietchapters.up.railway.app/files/:path*"
+    },
+    {
+      "source": "/webhooks/paystack",
+      "destination": "https://quietchapters.up.railway.app/webhooks/paystack"
+    },
+    {
+      "source": "/search/:path*",
+      "destination": "https://quietchapters.up.railway.app/search/:path*"
+    },
+    {
+      "source": "/resolve",
+      "destination": "https://quietchapters.up.railway.app/resolve"
+    }
+  ]
 }
