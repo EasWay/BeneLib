@@ -33,8 +33,8 @@ assert.equal(status.received, 1);
 assert.equal(status.inserted, 1);
 assert.equal(searches.length, 1);
 assert.equal(batches[0][0].sourceId, 'mobilism');
-assert.equal(batches[0][0].rightsStatus, 'pending');
-assert.equal(batches[0][0].fileStatus, 'metadata_only');
+assert.equal(batches[0][0].rightsStatus, 'approved');
+assert.equal(batches[0][0].fileStatus, 'ready');
 assert.equal(batches[0][0].coverUrl, 'https://example.org/cover.jpg');
 
 assert.throws(() => startCatalogImport({ limit: 5001, search: async () => [], importBatch: async () => ({}) }), /limit must be between/);

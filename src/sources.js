@@ -29,6 +29,7 @@
 
 import { browserGet, browserFetch, browserAvailable, verifyWindowOpen } from './browser.js';
 import { slumOrder } from './slum.js';
+import { fetchPublic } from './netguard.js';
 
 const CORS = {
     'Access-Control-Allow-Origin':  '*',
@@ -174,7 +175,9 @@ export async function get(url, ms = 7000, extra = {}, init = {}) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ms);
     try {
-        const r = await fetch(url, {
+        const { allowedHosts, ...fetchInit } = init;
+        const fetcher = allowedHosts ? (value, options) => fetchPublic(value, options, { allowedHosts }) : fetch;
+        const r = await fetcher(url, {
             signal: ctrl.signal,
             headers: {
                 'User-Agent': currentUA(),
@@ -182,7 +185,7 @@ export async function get(url, ms = 7000, extra = {}, init = {}) {
                 'Accept-Language': 'en-US,en;q=0.5',
                 ...extra,
             },
-            ...init,
+            ...fetchInit,
         });
         // Keep the timer running while the body is read. Clearing it at the headers let a mirror that sends
         // its body slowly hang text()/json() forever.
@@ -498,23 +501,26 @@ async function searchLibgen(query, mode) {
 // the key and build the direct URL. It tries a few mirrors, separate from the search mirror, because any
 // mirror that serves ads.php will do.
 async function resolveLibgenLinks(results, topN = 8, skip = []) {
-    const adsMirrors = (await orderedMirrors('libgen', LIBGEN_MIRRORS)).filter(m => !skip.includes(m)).slice(0, 3);
+    const adsMirrors = (await orderedMirrors('libgen', LIBGEN_MIRRORS)).filter(m => !skip.includes(m));
 
     const toResolve = results.slice(0, topN).filter(r => r.md5);
     await Promise.allSettled(toResolve.map(async r => {
         for (const adsMirror of adsMirrors) {
+            const host = adsMirror.replace(/^https:\/\//, ''), t0 = Date.now();
             try {
-                const adsUrl = `${adsMirror}/ads.php?md5=${r.md5.toLowerCase()}`;
-                const res = await get(adsUrl, 5000);
-                if (!res.ok) continue;
+                const md5 = r.md5.toLowerCase();
+                const res = await get(`${adsMirror}/ads.php?md5=${md5}`, 5000);
+                if (!res.ok) { noteHost(host, false, 0, `HTTP ${res.status}`); continue; }
                 const html = await res.text();
                 const keyMatch = html.match(/get\.php\?md5=[a-f0-9]+&(?:amp;)?key=([A-Za-z0-9]+)/i);
                 if (keyMatch) {
-                    r.directUrl   = `${adsMirror}/get.php?md5=${r.md5.toLowerCase()}&key=${keyMatch[1]}`;
+                    noteHost(host, true, Date.now() - t0);
+                    r.directUrl   = `${adsMirror}/get.php?md5=${md5}&key=${keyMatch[1]}`;
                     r.directReady = true;
                     break;
                 }
-            } catch(e) { /* try next mirror */ }
+                noteHost(host, false, 0, 'no download key');
+            } catch(e) { noteHost(host, false, 0, String(e && e.message || e).slice(0, 80)); }
         }
     }));
     return results;
@@ -832,15 +838,17 @@ function iaAudioBook(identifier, files) {
     };
 }
 
-async function resolveArchiveLinks(results, mode, topN = 10) {
-    const exts = mode === 'audiobooks' ? IA_AUDIO_EXTS : IA_EBOOK_EXTS;
+async function resolveArchiveLinks(results, mode, topN = 10, allowedHosts = null, ebookExts = IA_EBOOK_EXTS) {
+    const exts = mode === 'audiobooks' ? IA_AUDIO_EXTS : ebookExts;
     const toResolve = results.slice(0, topN).filter(r => r.identifier);
     await Promise.allSettled(toResolve.map(async r => {
         try {
-            const res = await get(`https://archive.org/metadata/${r.identifier}`, 7000, { 'Accept': 'application/json' });
+            const res = await get(`https://archive.org/metadata/${r.identifier}`, 12000, { 'Accept': 'application/json' },
+                allowedHosts ? { allowedHosts } : {});
             if (!res.ok) return;
             const meta = await res.json();
-            const files = Array.isArray(meta.files) ? meta.files : [];
+            if (meta?.metadata?.['access-restricted-item'] === 'true' || meta?.metadata?.access_restricted_item === 'true') return;
+            const files = (Array.isArray(meta.files) ? meta.files : []).filter(f => f && f.private !== 'true' && f.private !== true);
             const book = mode === 'audiobooks' && iaAudioBook(r.identifier, files);
             if (book) {
                 Object.assign(r, { directUrl: book.url, directReady: true, format: book.format, tracks: book.tracks });
@@ -849,15 +857,17 @@ async function resolveArchiveLinks(results, mode, topN = 10) {
                 if (book.bitrate) r.bitrate = book.bitrate;
                 return;
             }
+            const preferred = String(r.format || '').toLowerCase().replace(/^\./, '');
+            const orderedExts = preferred && exts.includes(preferred) ? [preferred, ...exts.filter(e => e !== preferred)] : exts;
             let best = null;
-            for (const ext of exts) {
+            for (const ext of orderedExts) {
                 best = files.find(f => (f.name || '').toLowerCase().endsWith('.' + ext));
                 if (best) break;
             }
             if (best) {
                 r.directUrl   = `https://archive.org/download/${r.identifier}/${encodeURIComponent(best.name)}`;
                 r.directReady = true;
-                if (!r.format) r.format = best.name.split('.').pop().toLowerCase();
+                r.format      = best.name.split('.').pop().toLowerCase();
                 const size = parseInt(best.size);
                 if (size > 0) r.filesize = size;
             }
@@ -868,12 +878,13 @@ async function resolveArchiveLinks(results, mode, topN = 10) {
 
 // ── Project Gutenberg ─────────────────────────────────────────────────────────
 // Public-domain ebooks, searched through gutenberg.org's OPDS feed. The search answer is the direct link.
-async function searchGutenberg(query, mode) {
+async function searchGutenberg(query, mode, allowedHosts = null) {
     if (mode === 'audiobooks') return [];
     try {
         // gutenberg.org's own OPDS search feed (Gutendex, the JSON mirror used before, went unreliable). Each
         // entry gives the book number, title and author; file and cover addresses follow from the number.
-        const res = await get(`https://www.gutenberg.org/ebooks/search.opds/?query=${encodeURIComponent(query)}`, 8000, { 'Accept': 'application/atom+xml' });
+        const res = await get(`https://www.gutenberg.org/ebooks/search.opds/?query=${encodeURIComponent(query)}`, 8000, { 'Accept': 'application/atom+xml' },
+            allowedHosts ? { allowedHosts } : {});
         if (!res.ok) return [];
         const xml = await res.text();
         const out = [];
@@ -905,10 +916,11 @@ async function searchGutenberg(query, mode) {
 // A small list (about 130 titles) of English textbooks. There is no search endpoint, but the whole list is
 // one request, so titles are matched locally. Each match needs one more request to its detail page for
 // the real PDF link (pdf_url).
-async function searchOpenStax(query, mode) {
+async function searchOpenStax(query, mode, allowedHosts = null) {
     if (mode === 'audiobooks') return [];
     try {
-        const listRes = await get('https://openstax.org/apps/cms/api/v2/pages/?type=books.Book&limit=250', 6000, { 'Accept': 'application/json' });
+        const listRes = await get('https://openstax.org/apps/cms/api/v2/pages/?type=books.Book&limit=250', 6000, { 'Accept': 'application/json' },
+            allowedHosts ? { allowedHosts } : {});
         if (!listRes.ok) return [];
         const listData = await listRes.json();
         const books = Array.isArray(listData.items) ? listData.items : [];
@@ -920,7 +932,9 @@ async function searchOpenStax(query, mode) {
             try {
                 const detailUrl = b.meta && b.meta.detail_url;
                 if (!detailUrl) return null;
-                const res = await get(detailUrl, 6000, { 'Accept': 'application/json' });
+                const url = new URL(detailUrl);
+                if (url.protocol !== 'https:' || !['openstax.org', 'www.openstax.org'].includes(url.hostname.toLowerCase())) return null;
+                const res = await get(url.href, 6000, { 'Accept': 'application/json' }, allowedHosts ? { allowedHosts } : {});
                 return res.ok ? await res.json() : null;
             } catch(e) { return null; }
         }));
@@ -951,11 +965,11 @@ async function searchOpenStax(query, mode) {
 // LibreTexts has no public API, but its catalog site commons.libretexts.org does (found by watching the
 // site's own search requests). Use ?searchQuery=; ?search= is silently ignored and returns the whole
 // catalog. Each entry links to a ready-made full-book PDF on batch.libretexts.org.
-async function searchLibreTexts(query, mode) {
+async function searchLibreTexts(query, mode, allowedHosts = null) {
     if (mode === 'audiobooks') return [];
     try {
         const url = `https://commons.libretexts.org/api/v1/search/books-v2?searchQuery=${encodeURIComponent(query)}&limit=10&page=1`;
-        const res = await get(url, 7000, { 'Accept': 'application/json' });
+        const res = await get(url, 7000, { 'Accept': 'application/json' }, allowedHosts ? { allowedHosts } : {});
         if (!res.ok) return [];
         const data = await res.json();
         const books = Array.isArray(data.results) ? data.results : [];
@@ -987,18 +1001,18 @@ async function searchLibreTexts(query, mode) {
 // /search?q=, no login and no bot check. It is mostly modern books, not public domain, so it does not get
 // the open-licence score bonus in scoreResult(). File URLs are built from the JSON
 // (library_url + dir_path + file_name), so no extra resolve request is needed.
-const MOTW_FORMAT_PREFS = ['epub', 'pdf', 'mobi', 'azw3'];
+const MOTW_FORMAT_PREFS = ['pdf', 'epub', 'mobi', 'azw3'];
 
 // Encode each path segment separately so the slashes stay as separators.
 function motwEncodePath(path) {
     return path.split('/').map(seg => seg ? encodeURIComponent(seg) : '').join('/');
 }
 
-async function searchMemoryOfTheWorld(query, mode) {
+async function searchMemoryOfTheWorld(query, mode, allowedHosts = null) {
     if (mode === 'audiobooks') return [];
     try {
         const url = `https://library.memoryoftheworld.org/search?q=${encodeURIComponent(query)}`;
-        const res = await get(url, 7000, { 'Accept': 'application/json' });
+        const res = await get(url, 7000, { 'Accept': 'application/json' }, allowedHosts ? { allowedHosts } : {});
         if (!res.ok) return [];
         const data = await res.json();
         const books = Array.isArray(data._items) ? data._items : [];
@@ -1429,6 +1443,8 @@ async function zlibEnsureSession() {
     return zlibLogin();
 }
 
+const zlibUrl = (domain, href) => !href ? '' : /^https?:\/\//i.test(href) ? href : domain + (href.startsWith('/') ? href : '/' + href);
+
 // No account: the site's own search page in the background browser (its proof-of-work script runs by
 // itself). Same cards a visitor sees; downloads then need the site's guest quota or a login.
 export function parseZlibCards(html, domain) {
@@ -1444,8 +1460,8 @@ export function parseZlibCards(html, domain) {
         out.push({
             title, author: slot('author'), year: attr('year'), language: attr('language'),
             format: attr('extension').toLowerCase(), filesize: size ? parseFilesizeBytes(size[1], size[2].toUpperCase()) : 0,
-            source: 'Z-Library', downloadUrl: domain + attr('href'),
-            ...(attr('download') ? { directUrl: domain + attr('download') } : {}),
+            source: 'Z-Library', downloadUrl: zlibUrl(domain, attr('href')),
+            ...(attr('download') ? { directUrl: zlibUrl(domain, attr('download')) } : {}),
             coverUrl: (isHttpUrl((m[2].match(/<img data-src="([^"]+)"/) || [])[1]) ? m[2].match(/<img data-src="([^"]+)"/)[1] : ''),
         });
     }
@@ -1487,7 +1503,7 @@ async function searchZlibrary(query, mode) {
             format:      String(b.extension || '').toLowerCase(),
             filesize:    Number(b.filesize) || 0,
             source:      'Z-Library',
-            downloadUrl: s.domain + (b.href || ''),
+            downloadUrl: zlibUrl(s.domain, b.href || ''),
             directUrl:   `/dl/zlib?id=${encodeURIComponent(b.id)}&hash=${encodeURIComponent(b.hash)}`,
             coverUrl:    isHttpUrl(b.cover) ? b.cover : '',
         })).filter(r => r.title);
@@ -1786,6 +1802,257 @@ export async function resolveOne(id) {
     await resolving.get(id);
     r._resolved = true;
     return decorate(r);
+}
+
+// Durable catalog records keep a source page, not an expiring direct URL or an in-memory search result ID.
+// Re-run the same source adapters used by search to resolve that page just before delivery.
+const DELIVERY_EXTS = ['pdf', 'epub', 'txt', 'zip'];
+export async function resolveCatalogBook(book) {
+    const sourceId = String(book?.source_id || '').toLowerCase();
+    const sourceRef = String(book?.source_ref || '').replace(/^https?:\/\/[^/]+https?\/\/+/i, 'https://');
+    const title = String(book?.title || '');
+    const authors = String(book?.authors || '');
+    const bookFormat = String(book?.format || '').toLowerCase().replace(/^\./, '');
+
+    const pickLibgenMatches = (items, preferredFmt = 'pdf') => {
+        const valid = items.filter(item => item?.md5 && DELIVERY_EXTS.includes(String(item.format || '').toLowerCase()));
+        const qNorm = normText(`${title} ${authors}`);
+        const tNorm = normText(title);
+        const authorWords = normText(authors).split(' ').filter(w => w.length > 2);
+        return valid
+            .map(item => {
+                const iTitle = normText(item.title);
+                const iAuthor = normText(item.author);
+                const fmt = String(item.format || '').toLowerCase();
+                let score = scoreResult(item, qNorm || title);
+                if (item.downloadUrl === sourceRef) score += 200;
+                if (iTitle === tNorm || iTitle.includes(tNorm)) score += 40;
+                if (authorWords.length && authorWords.every(w => iAuthor.includes(w))) score += 80;
+                else if (authorWords.length && authorWords.some(w => iAuthor.includes(w))) score += 30;
+                if (fmt === 'pdf') score += 90;
+                else if (preferredFmt && fmt === preferredFmt) score += 40;
+                return { item, score };
+            })
+            .sort((a, b) => b.score - a.score)
+            .map(x => x.item);
+    };
+
+    const searchLibgenWithFallback = async (preferredFmt = 'pdf') => {
+        if (!title) return [];
+        const shortTitle = title.split(/\s*[:;(\[]\s*/)[0].trim();
+        const cleanAuthor = authors.replace(/\b\d{4}-\d{0,4}\b/g, '').replace(/[,;]/g, ' ').replace(/\s+/g, ' ').trim();
+        let results = await searchLibgen(cleanAuthor ? `${title} ${cleanAuthor}` : title, 'ebooks');
+        if (!results.length && cleanAuthor) results = await searchLibgen(title, 'ebooks');
+        if (!results.length && shortTitle && shortTitle.length >= 4 && shortTitle !== title) {
+            results = await searchLibgen(cleanAuthor ? `${shortTitle} ${cleanAuthor}` : shortTitle, 'ebooks');
+            if (!results.length && cleanAuthor) results = await searchLibgen(shortTitle, 'ebooks');
+        }
+        return pickLibgenMatches(results, preferredFmt);
+    };
+
+    const crossSourceFallback = async (preferredFmt = 'pdf') => {
+        if (!title) return null;
+        try {
+            const matches = await searchLibgenWithFallback(preferredFmt);
+            const candidates = [];
+            for (const m of matches.slice(0, 3)) {
+                const target = { md5: m.md5.toLowerCase(), format: String(m.format || preferredFmt).toLowerCase(), filesize: m.filesize || 0 };
+                await resolveLibgenLinks([target], 1);
+                const resolvedFmt = String(target.format || preferredFmt).toLowerCase().replace(/^\./, '');
+                if (target.directUrl && DELIVERY_EXTS.includes(resolvedFmt)) {
+                    candidates.push({ url: target.directUrl, format: resolvedFmt, size: target.filesize || 0, md5: target.md5 });
+                }
+            }
+            if (candidates.length) return { ...candidates[0], fallbacks: candidates.slice(1) };
+        } catch {}
+        try {
+            const shortTitle = title.split(/\s*[:;(\[]\s*/)[0].trim() || title;
+            const motw = await searchMemoryOfTheWorld(shortTitle, 'ebooks', ['memoryoftheworld.org']);
+            const matchedMotw = motw.find(item => normText(item.title) === normText(title) && String(item.format || '').toLowerCase() === 'pdf')
+                || motw.find(item => normText(item.title) === normText(shortTitle) && String(item.format || '').toLowerCase() === 'pdf')
+                || motw.find(item => normText(item.title) === normText(title) || normText(item.title) === normText(shortTitle));
+            if (matchedMotw?.directUrl && DELIVERY_EXTS.includes(String(matchedMotw.format || '').toLowerCase())) {
+                return { url: matchedMotw.directUrl, format: String(matchedMotw.format).toLowerCase(), size: matchedMotw.filesize || 0 };
+            }
+        } catch {}
+        try {
+            const shortTitle = title.split(/\s*[:;(\[]\s*/)[0].trim() || title;
+            const searched = await searchArchive(shortTitle, 'ebooks');
+            const matched = searched.find(item => normText(item.title) === normText(title) || normText(item.title) === normText(shortTitle) || normText(item.title).includes(normText(shortTitle)));
+            if (matched?.identifier) {
+                const [result] = await resolveArchiveLinks([{ identifier: matched.identifier, format: 'pdf' }], 'ebooks', 1, ['archive.org'], DELIVERY_EXTS);
+                if (result?.directUrl) return { url: result.directUrl, format: result.format || 'pdf', size: result.filesize || 0 };
+            }
+        } catch {}
+        return null;
+    };
+
+    if (sourceId === 'gutenberg') {
+        const direct = sourceRef.match(/^https:\/\/(?:www\.)?gutenberg\.org\/.+\.(epub|pdf|txt|zip)$/i);
+        if (direct) return { url: sourceRef, format: direct[1].toLowerCase(), size: 0 };
+        const page = sourceRef.match(/^https:\/\/(?:www\.)?gutenberg\.org\/(?:ebooks|cache\/epub)\/(\d+)(?:\/|$|\.)/i);
+        if (page) {
+            const fmt = bookFormat === 'txt' ? 'txt' : 'epub';
+            const url = fmt === 'txt'
+                ? `https://www.gutenberg.org/ebooks/${page[1]}.txt.utf-8`
+                : `https://www.gutenberg.org/ebooks/${page[1]}.epub3.images`;
+            return { url, format: fmt, size: 0 };
+        }
+        const results = await searchGutenberg(title, 'ebooks', ['gutenberg.org']);
+        const result = results.find(item => item.pageUrl === sourceRef)
+            || results.find(item => normText(item.title) === normText(title));
+        return result?.directUrl ? { url: result.directUrl, format: result.format || 'epub', size: result.filesize || 0 } : null;
+    }
+
+    if (sourceId === 'archive' || sourceId === 'internet-archive') {
+        const direct = sourceRef.match(/^https:\/\/(?:www\.)?archive\.org\/download\/[^?#]+\.(epub|pdf|txt|zip)$/i);
+        if (direct) return { url: sourceRef, format: direct[1].toLowerCase(), size: 0 };
+        const page = sourceRef.match(/^https:\/\/(?:www\.)?archive\.org\/(?:details|download)\/([A-Za-z0-9._-]{1,100})(?:\/|$)/i);
+        let identifier = page ? page[1] : '';
+        if (!identifier && title) {
+            const searched = await searchArchive(title, 'ebooks');
+            const matched = searched.find(item => item.downloadUrl === sourceRef || normText(item.title) === normText(title));
+            identifier = matched?.identifier || '';
+        }
+        if (identifier) {
+            const [result] = await resolveArchiveLinks([{ identifier, format: 'pdf' }], 'ebooks', 1, ['archive.org'], DELIVERY_EXTS);
+            if (result?.directUrl) return { url: result.directUrl, format: result.format || 'pdf', size: result.filesize || 0 };
+        }
+        return crossSourceFallback('pdf');
+    }
+
+    if (sourceId === 'openstax') {
+        if (/^https:\/\/assets\.openstax\.org\/.+\.pdf$/i.test(sourceRef)) {
+            return { url: sourceRef, format: 'pdf', size: 0 };
+        }
+        const slug = sourceRef.match(/^https:\/\/(?:www\.)?openstax\.org\/details\/books\/([A-Za-z0-9._-]+)\/?$/i);
+        if (slug) {
+            try {
+                const res = await get(`https://openstax.org/apps/cms/api/v2/pages/?type=books.Book&slug=${encodeURIComponent(slug[1])}&fields=pdf_url,title`, 8000, { 'Accept': 'application/json' }, { allowedHosts: ['openstax.org'] });
+                if (res.ok) {
+                    const data = await res.json();
+                    const pdfUrl = data?.items?.[0]?.pdf_url;
+                    if (pdfUrl) return { url: pdfUrl, format: 'pdf', size: 0 };
+                }
+            } catch {}
+        }
+        const results = await searchOpenStax(title, 'ebooks', ['openstax.org']);
+        const result = results.find(item => item.pageUrl === sourceRef)
+            || results.find(item => normText(item.title) === normText(title));
+        return result?.directUrl ? { url: result.directUrl, format: result.format || 'pdf', size: result.filesize || 0 } : crossSourceFallback('pdf');
+    }
+
+    if (sourceId === 'libretexts') {
+        if (/^https:\/\/(?:batch|downloads)\.libretexts\.org\/.+(?:\.pdf|\/pdf)$/i.test(sourceRef)) {
+            return { url: sourceRef, format: 'pdf', size: 0 };
+        }
+        const cover = String(book?.cover_url || book?.coverUrl || '');
+        const deki = cover.match(/^https:\/\/([a-z0-9-]+)\.libretexts\.org\/@api\/deki\/pages\/(\d+)\//i);
+        if (deki) {
+            return { url: `https://downloads.libretexts.org/api/v1/download/${deki[1].toLowerCase()}-${deki[2]}/pdf`, format: 'pdf', size: 0 };
+        }
+        const results = await searchLibreTexts(title, 'ebooks', ['libretexts.org']);
+        const result = results.find(item => item.pageUrl === sourceRef)
+            || results.find(item => normText(item.title) === normText(title));
+        return result?.directUrl ? { url: result.directUrl, format: result.format || 'pdf', size: result.filesize || 0 } : crossSourceFallback('pdf');
+    }
+
+    if (sourceId === 'memoryoftheworld' || sourceId === 'memory-of-the-world') {
+        const direct = sourceRef.match(/^https:\/\/library\.memoryoftheworld\.org\/.+\.(epub|pdf|txt|zip)$/i);
+        if (direct) return { url: sourceRef, format: direct[1].toLowerCase(), size: 0 };
+        const results = await searchMemoryOfTheWorld(title, 'ebooks', ['memoryoftheworld.org']);
+        const result = results.find(item => item.downloadUrl === sourceRef)
+            || results.find(item => normText(item.title) === normText(title));
+        return result?.directUrl && DELIVERY_EXTS.includes(String(result.format || '').toLowerCase())
+            ? { url: result.directUrl, format: String(result.format).toLowerCase(), size: result.filesize || 0 }
+            : crossSourceFallback('pdf');
+    }
+
+    if (['libgen', 'library-genesis', 'annas', 'anna-s-archive'].includes(sourceId)) {
+        const md5Match = sourceRef.match(/[?&]md5=([a-f0-9]{32})/i) || sourceRef.match(/\/md5\/([a-f0-9]{32})/i);
+        const fmt = DELIVERY_EXTS.includes(bookFormat) ? bookFormat : 'pdf';
+        const candidates = [];
+        if (title) {
+            for (const m of await searchLibgenWithFallback('pdf')) {
+                if (!candidates.some(c => c.md5.toLowerCase() === m.md5.toLowerCase())) {
+                    candidates.push({ md5: m.md5.toLowerCase(), format: String(m.format || fmt || 'pdf').toLowerCase(), filesize: m.filesize || 0 });
+                }
+            }
+        }
+        if (md5Match && !candidates.some(c => c.md5 === md5Match[1].toLowerCase())) {
+            candidates.unshift({ md5: md5Match[1].toLowerCase(), format: fmt || 'pdf', filesize: 0 });
+        } else if (md5Match && fmt === 'pdf') {
+            const idx = candidates.findIndex(c => c.md5 === md5Match[1].toLowerCase());
+            if (idx > 0) { const [own] = candidates.splice(idx, 1); candidates.unshift(own); }
+        }
+        const resolvedList = [];
+        for (const target of candidates.slice(0, 3)) {
+            await resolveLibgenLinks([target], 1);
+            const resolvedFmt = String(target.format || fmt || 'pdf').toLowerCase().replace(/^\./, '');
+            if (target.directUrl && DELIVERY_EXTS.includes(resolvedFmt)) {
+                resolvedList.push({ url: target.directUrl, format: resolvedFmt, size: target.filesize || 0, md5: target.md5 });
+            }
+        }
+        if (resolvedList.length) return { ...resolvedList[0], fallbacks: resolvedList.slice(1) };
+        return crossSourceFallback(fmt);
+    }
+
+    if (sourceId === 'royallib') {
+        const direct = sourceRef.match(/^https:\/\/(?:www\.)?royallib\.com\/get\/([a-z0-9]+)\/[^?#]+\.zip$/i);
+        if (direct) return { url: sourceRef, format: 'zip', size: 0 };
+        const page = sourceRef.match(/^https:\/\/(?:www\.)?royallib\.com(\/book\/[^?#]+?)\.html$/i);
+        if (page) {
+            const target = { _bookPath: page[1] };
+            await resolveRoyalLibLinks([target], 1);
+            if (target.directUrl) {
+                return { url: target.directUrl, format: target.directUrl.toLowerCase().endsWith('.zip') ? 'zip' : (target.format || 'epub'), size: target.filesize || 0 };
+            }
+        }
+        return crossSourceFallback('pdf');
+    }
+
+    if (sourceId === 'zlibrary' || sourceId === 'z-library') {
+        const fmt = DELIVERY_EXTS.includes(bookFormat) ? bookFormat : 'pdf';
+        // Check LibGen first when possible so routine availability checks do not consume Z-Library's daily account quota.
+        if (title) {
+            try {
+                const matches = await searchLibgenWithFallback('pdf');
+                const candidates = [];
+                for (const lgMatch of matches.slice(0, 3)) {
+                    const target = { md5: lgMatch.md5.toLowerCase(), format: String(lgMatch.format || fmt).toLowerCase(), filesize: lgMatch.filesize || 0 };
+                    await resolveLibgenLinks([target], 1);
+                    if (target.directUrl && DELIVERY_EXTS.includes(target.format)) {
+                        candidates.push({ url: target.directUrl, format: target.format, size: target.filesize || 0, md5: target.md5 });
+                    }
+                }
+                if (candidates.length) return { ...candidates[0], fallbacks: candidates.slice(1) };
+            } catch {}
+        }
+        if (zlibConfigured()) {
+            const idHash = sourceRef.match(/[?&]id=(\d+)&hash=([a-z0-9]+)/i) || sourceRef.match(/\/book\/(\d+)\/([a-z0-9]+)(?:\/|$)/i);
+            if (idHash) {
+                const url = await zlibFileLink(idHash[1], idHash[2]);
+                if (url) return { url, format: fmt, size: 0 };
+            }
+            if (title) {
+                const bookSlug = (sourceRef.match(/\/book\/([A-Za-z0-9]+\/[^?#]+?)(?:\.html)?$/i) || [])[1] || '';
+                const results = await searchZlibrary(title, 'ebooks');
+                const matched = results.find(item => normText(item.title) === normText(title) && String(item.format || '').toLowerCase() === 'pdf')
+                    || (bookSlug && results.find(item => String(item.downloadUrl || '').includes(bookSlug)))
+                    || results.find(item => normText(item.title) === normText(title) && (!bookFormat || String(item.format || '').toLowerCase() === bookFormat))
+                    || results.find(item => normText(item.title) === normText(title));
+                const dlMatch = String(matched?.directUrl || '').match(/[?&]id=(\d+)&hash=([a-z0-9]+)/i);
+                if (dlMatch) {
+                    const url = await zlibFileLink(dlMatch[1], dlMatch[2]);
+                    const resolvedFmt = DELIVERY_EXTS.includes(String(matched?.format || '').toLowerCase()) ? String(matched.format).toLowerCase() : fmt;
+                    if (url) return { url, format: resolvedFmt, size: matched?.filesize || 0 };
+                }
+            }
+        }
+        return crossSourceFallback(fmt);
+    }
+
+    return crossSourceFallback(bookFormat || 'pdf');
 }
 
 // resolveTopN limits how many results get a direct link in non-streaming searches (each costs a request).

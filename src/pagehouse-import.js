@@ -37,6 +37,47 @@ const safeUrl = value => {
   } catch { return ''; }
 };
 
+// A search result as a catalogue record (metadata only, no file, no price yet). Shared by the nightly import and
+// by the storefront when a shopper opens a result from the all-sources search, so both file a book identically.
+// The rights status is left to the caller.
+export function catalogItemFromResult(item, sourceId, sourceName) {
+  const title = String(item?.title || '').trim();
+  const pageUrl = safeUrl(item.pageUrl || item.detailUrl || item.topicUrl || item.downloadUrl);
+  const sourceRef = pageUrl || `search:${crypto.createHash('sha256').update(`${title}\0${item.author || item.authors || ''}`).digest('hex')}`;
+  const year = Number.parseInt(item.year, 10);
+  return {
+    sourceId,
+    sourceRef,
+    sourceName,
+    title,
+    authors: String(item.author || item.authors || '').trim(),
+    description: String(item.description || '').trim(),
+    language: String(item.language || '').trim(),
+    publishedYear: Number.isInteger(year) && year >= 0 && year <= 2200 ? year : null,
+    format: String(item.format || '').replace(/^\./, '').toLowerCase(),
+    subjects: Array.isArray(item.subjects) ? item.subjects : [],
+    coverUrl: safeUrl(item.coverUrl || item.cover_url || item.cover || ''),
+    license: String(item.license || '').trim(),
+    rightsScope: String(item.rightsScope || '').trim(),
+    rightsEvidence: String(item.rightsEvidence || '').trim(),
+    attribution: String(item.attribution || '').trim(),
+    priceMinor: 0,
+    currency: 'GHS',
+    rightsStatus: 'approved',
+    fileStatus: 'ready',
+    status: 'listed',
+  };
+}
+
+// The catalogue's id for a source, from a search result's display name ("Z-Library" → zlibrary). Older records
+// also used a slug of the display name (z-library), so both are returned for duplicate checks.
+export function sourceIdsForName(name) {
+  const display = String(name || '').trim();
+  const known = SOURCES.find(([, label]) => label.toLowerCase() === display.toLowerCase());
+  const slug = display.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+  return [...new Set([known ? known[0] : slug, slug].filter(Boolean))];
+}
+
 let activeRun = null;
 let lastRun = null;
 
@@ -104,35 +145,12 @@ export function startCatalogImport({ search, importBatch, disabledSources = [], 
           for (const item of values) {
             const title = String(item?.title || '').trim();
             if (!title) continue;
-            const pageUrl = safeUrl(item.pageUrl || item.detailUrl || item.topicUrl || item.downloadUrl);
-            const sourceRef = pageUrl || `search:${crypto.createHash('sha256').update(`${title}\0${item.author || item.authors || ''}`).digest('hex')}`;
-            const key = `${sourceId}\0${sourceRef}`;
+            const record = catalogItemFromResult(item, sourceId, sourceName);
+            const key = `${sourceId}\0${record.sourceRef}`;
             if (seen.has(key)) continue;
             seen.add(key);
             if (run.received >= cap) break;
-            const year = Number.parseInt(item.year, 10);
-            batch.push({
-              sourceId,
-              sourceRef,
-              sourceName,
-              title,
-              authors: String(item.author || item.authors || '').trim(),
-              description: String(item.description || '').trim(),
-              language: String(item.language || '').trim(),
-              publishedYear: Number.isInteger(year) && year >= 0 && year <= 2200 ? year : null,
-              format: String(item.format || '').replace(/^\./, '').toLowerCase(),
-              subjects: Array.isArray(item.subjects) ? item.subjects : [],
-              coverUrl: safeUrl(item.coverUrl || item.cover_url || item.cover || ''),
-              rightsStatus: 'pending',
-              license: String(item.license || '').trim(),
-              rightsScope: String(item.rightsScope || '').trim(),
-              rightsEvidence: String(item.rightsEvidence || '').trim(),
-              attribution: String(item.attribution || '').trim(),
-              priceMinor: 0,
-              currency: 'GHS',
-              fileStatus: 'metadata_only',
-              status: 'listed',
-            });
+            batch.push({ ...record, rightsStatus: 'approved', fileStatus: 'ready' });
             run.received++;
             if (batch.length >= MAX_BATCH) await flush();
           }

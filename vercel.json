@@ -1,0 +1,40 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "outputDirectory": "public",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/pagehouse.html"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://pagehouse-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/cover",
+      "destination": "https://pagehouse-backend.onrender.com/cover"
+    },
+    {
+      "source": "/events",
+      "destination": "https://pagehouse-backend.onrender.com/events"
+    },
+    {
+      "source": "/files/:path*",
+      "destination": "https://pagehouse-backend.onrender.com/files/:path*"
+    },
+    {
+      "source": "/webhooks/paystack",
+      "destination": "https://pagehouse-backend.onrender.com/webhooks/paystack"
+    },
+    {
+      "source": "/search/:path*",
+      "destination": "https://pagehouse-backend.onrender.com/search/:path*"
+    },
+    {
+      "source": "/resolve",
+      "destination": "https://pagehouse-backend.onrender.com/resolve"
+    }
+  ]
+}

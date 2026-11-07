@@ -38,6 +38,21 @@ services:
       PAGEHOUSE_CALLBACK_URL: ${PAGEHOUSE_CALLBACK_URL:-}
       PAGEHOUSE_TOKEN_SECRET: ${PAGEHOUSE_TOKEN_SECRET:-}
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      PAYSTACK_WEBHOOK_SECRET: ${PAYSTACK_WEBHOOK_SECRET:-}
+      PAGEHOUSE_LIBRARY_SECRET: ${PAGEHOUSE_LIBRARY_SECRET:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      PAGEHOUSE_EMAIL_FROM: ${PAGEHOUSE_EMAIL_FROM:-}
+      PAGEHOUSE_OWNER_EMAIL: ${PAGEHOUSE_OWNER_EMAIL:-}
+      PAGEHOUSE_PUBLIC_URL: ${PAGEHOUSE_PUBLIC_URL:-}
+      PAGEHOUSE_EMAIL_DAILY_LIMIT: ${PAGEHOUSE_EMAIL_DAILY_LIMIT:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-}
     restart: unless-stopped
     # Docker's usual seccomp profile, plus the namespace calls Chromium's sandbox needs, so the background browser
     # keeps each page it opens shut away from the rest of the container. Without it the browser still works, unsandboxed.

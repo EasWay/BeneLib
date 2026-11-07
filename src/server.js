@@ -32,8 +32,14 @@ import { zipFolder, zipSize } from './zip.js';
 import { refreshSlum, slumSummary } from './slum.js';
 import { fetchPublic, readCapped } from './netguard.js';
 import * as pagehouse from './pagehouse.js';
-import { getCatalogImportStatus, startCatalogImport } from './pagehouse-import.js';
+import { getCatalogImportStatus, startCatalogImport, catalogItemFromResult, sourceIdsForName } from './pagehouse-import.js';
 import * as pagehousePayments from './pagehouse-payments.js';
+import * as pagehouseRequests from './pagehouse-requests.js';
+import * as pagehouseEmail from './pagehouse-email.js';
+import * as pagehouseLibrary from './pagehouse-library.js';
+import * as pagehouseDelivery from './pagehouse-delivery.js';
+import { convertEpubBufferToPdf, convertEpubFileToPdf } from './epub-pdf.js';
+import { supabaseConfigured, supabaseStatus, pushDatabaseToSupabase, pullDatabaseFromSupabase } from './supabase.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const RENAME_JS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'rename.js');
@@ -143,10 +149,12 @@ const OPEN = [
     [/^\/api\/(settings|status)$/, 'GET'], [/^\/api\/downloads$/, 'POST'], [/^\/api\/jobs\/[a-f0-9]+$/, 'DELETE'],
     [/^\/api\/jobs\/[a-f0-9]+\/retry$/, 'POST'], [/^\/api\/shelf$/, 'GET'], [/^\/api\/shelf\/delete$/, 'POST'],
     [/^\/api\/shelf\/[a-f0-9]+\/forget$/, 'POST'], [/^\/api\/me\/password$/, 'POST'], [/^\/api\/logout$/, 'POST'],
-    [/^\/api\/store\/catalog$/, 'GET'], [/^\/api\/store\/catalog\/[a-f0-9]{32}$/, 'GET'],
-    [/^\/api\/store\/source-search$/, 'GET'],
+    [/^\/api\/store\/catalog$/, 'GET'], [/^\/api\/store\/catalog\/categories$/, 'GET'], [/^\/api\/store\/catalog\/[a-f0-9]{32}$/, 'GET'],
+    [/^\/api\/store\/source-search$/, 'GET'], [/^\/api\/store\/source-results\/[a-z0-9]{1,40}$/, 'POST'],
     [/^\/api\/store\/checkout$/, 'POST'], [/^\/api\/store\/orders\/PH-[a-f0-9]{36}$/, 'GET'],
     [/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/, 'POST'], [/^\/api\/store\/download\/[A-Za-z0-9_.-]+$/, 'GET'],
+    [/^\/api\/store\/requests$/, 'POST'], [/^\/api\/store\/checkout\/momo$/, 'POST'], [/^\/api\/store\/library$/, 'GET'],
+    [/^\/api\/store\/library\/(logout|passkeys\/(register|login)(-options)?)$/, 'POST'], [/^\/api\/store\/requests\/RQ-[a-f0-9]{24}$/, 'GET'],
     [/^\/events$/, 'GET'], [/^\/files\/[a-f0-9]+$/, 'GET'], [/^\/cover$/, 'GET'],
     [/^\/search\/[a-z]+$/, 'GET'], [/^\/resolve$/, 'GET'], [/^\/torrent$/, 'GET'],
 ];
@@ -221,6 +229,17 @@ function hostTrusted(req) {
     return String(process.env.ALLOWED_HOSTS || '').toLowerCase().split(',').map(x => x.trim()).includes(h);
 }
 const secure = req => req.headers['x-forwarded-proto'] === 'https';
+// Passkeys belong to the site's host name and only work over HTTPS (or on localhost). The expected origin is
+// the address this request came to; behind a proxy that is its forwarded host and scheme.
+function relyingParty(req) {
+    const host = String((process.env.TRUST_PROXY === '1' && req.headers['x-forwarded-host']) || req.headers.host || '').split(',')[0].trim().toLowerCase();
+    const hostname = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+    if (!hostname || net.isIP(hostname)) throw Object.assign(new Error('Open Pagehouse by its name, not an IP address, to use Face ID or fingerprint.'), { statusCode: 400 });
+    const https = secure(req) || !!req.socket.encrypted;
+    if (!https && hostname !== 'localhost' && !hostname.endsWith('.localhost')) throw Object.assign(new Error('Face ID and fingerprint need the secure (https) address of Pagehouse.'), { statusCode: 400 });
+    return { id: hostname, origin: `${https ? 'https' : 'http'}://${host}` };
+}
+const libraryView = lib => ({ library: pagehouseLibrary.summary(lib), requests: pagehouseRequests.libraryRequests(lib.id), orders: pagehousePayments.libraryOrders(lib.id) });
 const fail = (res, e, code = 400) => send(res, code, { error: (e && e.message) || String(e) });
 
 // ── Server-sent events ───────────────────────────────────────────────────────
@@ -244,6 +263,25 @@ jobs.events.on('event', ev => {
 // Downloads queued while the tunnel was down start once it is back.
 onVpnChange(v => { jobs.events.emit('event', { type: 'vpn', up: v.up, error: v.error }); jobs.pump(); });
 setInterval(() => { dropStale(); for (const c of clients.keys()) c.write(': ping\n\n'); }, 25e3).unref();
+// Book requests: match open ones against newly published books, mark purchases, expire and purge. Hourly, and
+// straight after an import or approval publishes new books.
+function sweepBookRequests() {
+    try { const r = pagehouseRequests.sweepRequests(); if (r.matched || r.expired || r.closed) console.log('[requests]', JSON.stringify(r)); }
+    catch (e) { console.error('[requests] sweep failed:', e.message); }
+    sendEmails();
+}
+// Email outbox: queued emails go out every minute, and straight away after anything queues one. Without a
+// mail server configured (SMTP_HOST, PAGEHOUSE_EMAIL_FROM) they wait in the outbox.
+function sendEmails() {
+    pagehouseEmail.processOutbox().then(r => { if (r.sent || r.failed) console.log('[email]', JSON.stringify(r)); })
+        .catch(e => console.error('[email] outbox run failed:', e.message));
+}
+setInterval(sendEmails, 60e3).unref();
+if (!pagehouseEmail.isConfigured()) console.log(`[email] ${pagehouseEmail.emailConfig().problem}: store emails are queued, not sent.`);
+setInterval(sweepBookRequests, 3600e3).unref();
+setTimeout(sweepBookRequests, 30e3).unref();
+setTimeout(() => { pagehouseDelivery.runScheduledChecks().catch(error => console.error('Scheduled delivery check failed:', error)); }, 45e3).unref();
+setInterval(() => { pagehouseDelivery.runScheduledChecks().catch(error => console.error('Scheduled delivery check failed:', error)); }, 60e3).unref();
 
 // What a non-admin's page may know of the settings: how searching and saving behave, never folders,
 // addresses, logins or keys.
@@ -283,10 +321,6 @@ async function api(req, res, url, me) {
     let mm;
 
     if (p === '/api/store/source-search' && m === 'GET') {
-        const policy = pagehouse.getRightsPolicy();
-        if (!policy.adminConfirmed || !policy.license || !policy.rightsScope || !policy.rightsEvidence) {
-            return fail(res, 'Configure and confirm a complete universal license, rights scope, and evidence in Admin → Store catalogue before searching external sources.', 409);
-        }
         const query = (url.searchParams.get('q') || '').trim();
         if (!query || query.length > 200) return fail(res, 'q must contain between 1 and 200 characters');
         const searchUrl = new URL('http://localhost/search/all');
@@ -301,17 +335,33 @@ async function api(req, res, url, me) {
         if (!Array.isArray(result.results)) return fail(res, 'Search returned an invalid result list', 502);
         return send(res, 200, { results: result.results }, { 'Cache-Control': 'no-store' });
     }
+    // A shopper opened a result from the all-sources search. It becomes (or already is) a catalogue book and opens
+    // like one: details, price, bag and checkout. Only the result id is sent; its links stay on the server.
+    if ((mm = p.match(/^\/api\/store\/source-results\/([a-z0-9]{1,40})$/)) && m === 'POST') {
+        const r = getResult(mm[1]);
+        if (!r || (r._mode && r._mode !== 'ebooks') || !String(r.title || '').trim()) return fail(res, 'This search result has expired. Search again to open it.', 404);
+        const sourceName = String(r.source || '').trim().slice(0, 120) || 'Book source';
+        const ids = sourceIdsForName(sourceName);
+        try {
+            const listed = pagehouse.listSourceResult(catalogItemFromResult(r, ids[0], sourceName), ids);
+            if (listed.created) sweepBookRequests(); // it may be a book someone asked for
+            return send(res, listed.created ? 201 : 200, listed.book);
+        } catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
+    if (p === '/api/store/catalog/categories' && m === 'GET') {
+        return send(res, 200, pagehouse.categoryOverview({ perCategory: url.searchParams.get('books') }), { 'Cache-Control': 'no-store' });
+    }
     if (p === '/api/store/catalog' && m === 'GET') {
         const subjects = (url.searchParams.get('subjects') || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 30);
-        const result = pagehouse.searchCatalog({ q: url.searchParams.get('q') || '', subjects, limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset') });
-        return send(res, 200, result, { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=120' });
+        const result = pagehouse.searchCatalog({ q: url.searchParams.get('q') || '', subjects, category: url.searchParams.get('category') || '', limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset') });
+        return send(res, 200, result, { 'Cache-Control': 'no-store' });
     }
     if ((mm = p.match(/^\/api\/store\/catalog\/([a-f0-9]{32})\/cover$/)) && m === 'GET') {
         return sendCatalogCover(res, mm[1]);
     }
     if ((mm = p.match(/^\/api\/store\/catalog\/([a-f0-9]{32})$/)) && m === 'GET') {
         const book = pagehouse.getBook(mm[1]);
-        return book ? send(res, 200, book, { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300' }) : send(res, 404, { error: 'Book not found' });
+        return book ? send(res, 200, book, { 'Cache-Control': 'no-store' }) : send(res, 404, { error: 'Book not found' });
     }
     if (p === '/api/store/admin/catalog/import' && m === 'POST') {
         try {
@@ -323,7 +373,9 @@ async function api(req, res, url, me) {
                     .find(value => typeof value === 'string' && value.trim()) || '';
                 return coverUrl ? { ...item, coverUrl } : item;
             }) : b.items;
-            return send(res, 200, pagehouse.importBooks(items));
+            const imported = pagehouse.importBooks(items);
+            sweepBookRequests();
+            return send(res, 200, imported);
         } catch (e) { return fail(res, e); }
     }
     if (p === '/api/store/admin/catalog/import-run' && m === 'POST') {
@@ -332,7 +384,7 @@ async function api(req, res, url, me) {
             const started = startCatalogImport({
                 limit: b.limit ?? 5000,
                 disabledSources: settings.sources.off,
-                importBatch: items => pagehouse.importBooks(items, { reviewOnly: true }),
+                importBatch: items => { const res = pagehouse.importBooks(items); sweepBookRequests(); return res; },
                 search: async (source, query) => {
                     const searchUrl = new URL(`http://localhost/search/${source}`);
                     searchUrl.searchParams.set('mode', 'ebooks');
@@ -384,12 +436,99 @@ async function api(req, res, url, me) {
     if (p === '/api/store/admin/catalog/approve' && m === 'POST') {
         try {
             const b = await json(req);
-            return send(res, 200, pagehouse.approvePendingBooks(b.ids));
+            const approved = pagehouse.approvePendingBooks(b.ids);
+            sweepBookRequests();
+            return send(res, 200, approved);
         } catch (e) { return fail(res, e); }
     }
+    if (p === '/api/store/admin/source-licences' && m === 'GET') return send(res, 200, pagehouse.listSourceLicences(), { 'Cache-Control': 'no-store' });
+    if ((mm = p.match(/^\/api\/store\/admin\/source-licences\/([a-z0-9][a-z0-9._-]{0,79})$/)) && m === 'PUT') {
+        try { return send(res, 200, pagehouse.saveSourceLicence(mm[1], await json(req, 8e3))); } catch (e) { return fail(res, e); }
+    }
+    if ((mm = p.match(/^\/api\/store\/admin\/source-licences\/([a-z0-9][a-z0-9._-]{0,79})\/revoke$/)) && m === 'POST') {
+        try { return send(res, 200, pagehouse.revokeSourceLicence(mm[1])); } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/pricing' && m === 'GET') return send(res, 200, pagehouse.storePrice(), { 'Cache-Control': 'no-store' });
+    if (p === '/api/store/admin/pricing' && m === 'PUT') {
+        try { return send(res, 200, pagehouse.setStorePrice(await json(req, 2e3))); } catch (e) { return fail(res, e); }
+    }
     if (p === '/api/store/admin/catalog/stats' && m === 'GET') return send(res, 200, pagehouse.catalogStats());
+    if (p === '/api/store/admin/supabase' && m === 'GET') return send(res, 200, supabaseStatus(), { 'Cache-Control': 'no-store' });
+    if (p === '/api/store/admin/supabase/sync' && m === 'POST') {
+        try {
+            const b = await json(req, 2e3);
+            const out = b.direction === 'pull' ? await pullDatabaseFromSupabase(pagehouse.db) : await pushDatabaseToSupabase(pagehouse.db);
+            return send(res, 200, out, { 'Cache-Control': 'no-store' });
+        } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/delivery' && m === 'GET') {
+        return send(res, 200, pagehouseDelivery.deliveryStats(), { 'Cache-Control': 'no-store' });
+    }
+    if (p === '/api/store/admin/delivery/check' && m === 'POST') {
+        try {
+            const body = await json(req, 2e3);
+            return send(res, 202, pagehouseDelivery.startDeliveryChecks({ force: true, limit: body.limit ?? 50 }), { 'Cache-Control': 'no-store' });
+        } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/requests' && m === 'POST') {
+        try { const created = pagehouseRequests.createRequest(await json(req, 8e3), Date.now(), { libraryId: pagehouseLibrary.sessionLibrary(req)?.id || '' }); sendEmails(); return send(res, 201, created); }
+        catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
+    if (p === '/api/store/admin/email' && m === 'GET') return send(res, 200, pagehouseEmail.outboxStatus());
+    if (p === '/api/store/admin/email/test' && m === 'POST') {
+        try {
+            const b = await json(req, 2e3);
+            const to = String(b.to || pagehouseEmail.emailConfig().owner || '').trim().toLowerCase();
+            if (!pagehouseEmail.enqueue(pagehouseEmail.testEmail(to))) return fail(res, 'Enter a valid address to send the test to');
+            const result = await pagehouseEmail.processOutbox();
+            return send(res, 200, { ...result, status: pagehouseEmail.outboxStatus() });
+        } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/admin/email/retry' && m === 'POST') {
+        const r = pagehouseEmail.retryFailed(); sendEmails(); return send(res, 200, r);
+    }
+    if ((mm = p.match(/^\/api\/store\/requests\/(RQ-[a-f0-9]{24})$/)) && m === 'GET') {
+        const r = pagehouseRequests.getRequestForRequester(mm[1], url.searchParams.get('email') || '');
+        return r ? send(res, 200, r) : send(res, 404, { error: 'Request not found' });
+    }
+    if (p === '/api/store/admin/requests' && m === 'GET') {
+        return send(res, 200, pagehouseRequests.listRequests({ status: url.searchParams.get('status') || '', limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset') }));
+    }
+    if (p === '/api/store/admin/requests/sweep' && m === 'POST') return send(res, 200, pagehouseRequests.sweepRequests());
+    if ((mm = p.match(/^\/api\/store\/admin\/requests\/([0-9a-f-]{36})\/close$/)) && m === 'POST') {
+        try { return send(res, 200, pagehouseRequests.closeRequest(mm[1])); } catch (e) { return fail(res, e); }
+    }
+    if (p === '/api/store/checkout/momo' && m === 'POST') {
+        try {
+            let clientSecret = pagehouseLibrary.checkoutSecret(req), headers = {};
+            if (!clientSecret) { const c = pagehouseLibrary.newCheckoutSecretCookie(secure(req)); clientSecret = c.value; headers = { 'Set-Cookie': c.cookie }; }
+            const result = await pagehousePayments.createMomoCharge(await json(req), fetch, { libraryId: pagehouseLibrary.sessionLibrary(req)?.id || '', clientHash: pagehouseLibrary.hashSecret(clientSecret) });
+            if (result.status === 'paid') sendEmails();
+            return send(res, 201, result, headers);
+        } catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
+    if (p === '/api/store/library' && m === 'GET') {
+        const lib = pagehouseLibrary.sessionLibrary(req);
+        return lib ? send(res, 200, libraryView(lib)) : send(res, 401, { error: 'No Library on this device yet' });
+    }
+    if (p === '/api/store/library/logout' && m === 'POST') return send(res, 200, { ok: true }, { 'Set-Cookie': pagehouseLibrary.clearSessionCookie(secure(req)) });
+    if (p === '/api/store/library/passkeys/register-options' && m === 'POST') {
+        try { return send(res, 200, pagehouseLibrary.registrationOptions(relyingParty(req), pagehouseLibrary.sessionLibrary(req))); }
+        catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
+    if (p === '/api/store/library/passkeys/login-options' && m === 'POST') {
+        try { return send(res, 200, pagehouseLibrary.loginOptions(relyingParty(req))); }
+        catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
+    if ((p === '/api/store/library/passkeys/register' || p === '/api/store/library/passkeys/login') && m === 'POST') {
+        try {
+            const b = await json(req, 32e3);
+            const lib = p.endsWith('/register') ? pagehouseLibrary.finishRegistration(b.challengeId, b.credential) : pagehouseLibrary.finishLogin(b.challengeId, b.credential);
+            return send(res, 200, libraryView(lib), { 'Set-Cookie': pagehouseLibrary.sessionCookie(lib.id, secure(req)) });
+        } catch (e) { return fail(res, e, e.statusCode || 400); }
+    }
     if (p === '/api/store/checkout' && m === 'POST') {
-        try { return send(res, 201, await pagehousePayments.createCheckout(await json(req))); }
+        try { return send(res, 201, await pagehousePayments.createCheckout(await json(req), fetch, { libraryId: pagehouseLibrary.sessionLibrary(req)?.id || '' })); }
         catch (e) { return fail(res, e, e.statusCode || 400); }
     }
     if ((mm = p.match(/^\/api\/store\/orders\/(PH-[a-f0-9]{36})$/)) && m === 'GET') {
@@ -400,13 +539,31 @@ async function api(req, res, url, me) {
         try {
             const b = await json(req);
             if (!pagehousePayments.getOrderForBuyer(mm[1], b.email || '')) return send(res, 404, { error: 'Order not found' });
-            return send(res, 200, await pagehousePayments.verifyCheckout(mm[1]));
+            const order = await pagehousePayments.verifyCheckout(mm[1]);
+            sendEmails();
+            // A MoMo payment approved on this phone opens its Library here (only for the browser that started it).
+            const libraryId = pagehousePayments.libraryForVerifiedOrder(mm[1], pagehouseLibrary.hashSecret(pagehouseLibrary.checkoutSecret(req)));
+            return send(res, 200, { ...order, libraryOpened: !!libraryId }, libraryId ? { 'Set-Cookie': pagehouseLibrary.sessionCookie(libraryId, secure(req)) } : {});
         } catch (e) { return fail(res, e, e.statusCode || 400); }
     }
     if ((mm = p.match(/^\/api\/store\/download\/([A-Za-z0-9_.-]+)$/)) && m === 'GET') {
+        const grant = pagehousePayments.getDownloadGrant(mm[1]);
+        if (!grant) return send(res, 404, { error: 'Download link is invalid, expired or already used' });
+        if (!grant.fileKey) {
+            const result = await pagehouseDelivery.streamBook(grant, req, res, pagehousePayments);
+            if (result.error && !res.headersSent) return fail(res, result.error, result.statusCode);
+            return;
+        }
         const f = pagehousePayments.consumeDownloadToken(mm[1]);
         if (!f) return send(res, 404, { error: 'Download link is invalid, expired or already used' });
         let size; try { size = fs.statSync(f.path).size; } catch { return send(res, 404, { error: 'File not found' }); }
+        if (/\.epub$/i.test(f.filename) || /epub/i.test(f.contentType || '')) {
+            const pdfBuf = await convertEpubBufferToPdf(fs.readFileSync(f.path), { title: f.filename.replace(/\.epub$/i, '') });
+            const pdfName = f.filename.replace(/\.epub$/i, '.pdf').replace(/[^\x20-\x7e]|["\\]/g, '_');
+            res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': pdfBuf.length, 'Cache-Control': 'no-store',
+                'Content-Disposition': `attachment; filename="${pdfName}"`, ...SECURITY }).end(pdfBuf);
+            return;
+        }
         const filename = f.filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
         res.writeHead(200, { 'Content-Type': f.contentType, 'Content-Length': size, 'Cache-Control': 'no-store',
             'Content-Disposition': `attachment; filename="${filename}"`, ...SECURITY });
@@ -661,7 +818,7 @@ async function sendCoverSource(res, src) {
 }
 
 // Sends a shelf item to the device: the file itself, or a zip for an audiobook folder.
-function sendShelfFile(req, res, id, url, me) {
+async function sendShelfFile(req, res, id, url, me) {
     if (!settings.saving.allow) return fail(res, 'Saving to devices is switched off in the admin panel', 403);
     const item = jobs.getItem(id);
     if (item && !jobs.canSee(me, item)) return fail(res, 'That file is not on the server any more', 404);
@@ -674,6 +831,14 @@ function sendShelfFile(req, res, id, url, me) {
     if (f.isDir) {
         res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': zipSize(f.path, base), 'Content-Disposition': disp, ...SECURITY });
         zipFolder(f.path, res, base).then(() => { res.end(); done(); }, () => res.destroy());
+        return;
+    }
+    if (item?.kind === 'ebook' && /\.epub$/i.test(base)) {
+        const pdfName = base.replace(/\.epub$/i, '.pdf');
+        const pdfDisp = `attachment; filename="${pdfName.replace(/[^\x20-\x7e]|"/g, '_')}"; filename*=UTF-8''${encodeURIComponent(pdfName)}`;
+        const pdfBuf = await convertEpubBufferToPdf(await fs.promises.readFile(f.path), { title: item.title || '', author: item.author || '' });
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': pdfBuf.length, 'Content-Disposition': pdfDisp, ...SECURITY }).end(pdfBuf);
+        done();
         return;
     }
     const size = fs.statSync(f.path).size;
@@ -695,24 +860,46 @@ function sendShelfFile(req, res, id, url, me) {
 // that browsers say where a request comes from. Anything that changes something must come from this page.
 function crossSite(req) {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return false;
+    const origin = req.headers.origin;
+    const allowedOrigins = String(process.env.FRONTEND_ORIGIN || '').split(',').map(s => s.trim().toLowerCase().replace(/\/+$/, '')).filter(Boolean);
+    if (origin && allowedOrigins.includes(String(origin).toLowerCase().replace(/\/+$/, ''))) return false;
     const site = req.headers['sec-fetch-site'];
     if (site && site !== 'same-origin' && site !== 'none') return true;
-    const origin = req.headers.origin;
     if (!origin) return false;
     let host; try { host = new URL(origin).host; } catch (e) { return true; }
     const own = [req.headers.host, process.env.TRUST_PROXY === '1' && req.headers['x-forwarded-host']].filter(Boolean).map(h => String(h).split(',')[0].trim());
     return !own.includes(host);
 }
 
+function frontendCorsHeaders(req) {
+    const origin = String(req.headers.origin || '').trim().replace(/\/+$/, '');
+    if (!origin) return {};
+    const allowedOrigins = String(process.env.FRONTEND_ORIGIN || '').split(',').map(s => s.trim().toLowerCase().replace(/\/+$/, '')).filter(Boolean);
+    if (!allowedOrigins.includes(origin.toLowerCase())) return {};
+    return {
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Headers': 'Content-Type, Accept, Range',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    };
+}
+
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname;
+    const cors = frontendCorsHeaders(req);
+    if (Object.keys(cors).length) {
+        for (const [k, v] of Object.entries(cors)) res.setHeader(k, v);
+        if (req.method === 'OPTIONS') { res.writeHead(204, SECURITY).end(); return; }
+    }
     try {
         if (p === '/health') { res.writeHead(200).end('ok'); return; }
         if (p === '/webhooks/paystack' && req.method === 'POST') {
             try {
                 const raw = await body(req, 1e6);
-                return send(res, 200, await pagehousePayments.handlePaystackWebhook(raw, req.headers['x-paystack-signature']));
+                const result = await pagehousePayments.handlePaystackWebhook(raw, { modern: req.headers['paystack-signature'], legacy: req.headers['x-paystack-signature'] });
+                sendEmails();
+                return send(res, 200, result);
             } catch (e) { return fail(res, e, e.statusCode || 500); }
         }
         if (crossSite(req)) return fail(res, 'Requests from other sites are not allowed', 403);
@@ -772,14 +959,19 @@ const server = http.createServer(async (req, res) => {
             if (auth.apiNeedsKey() && !me.user && !auth.apiKeyOk(req)) return send(res, 401, { error: 'Missing or invalid X-API-Key' }, API_CORS);
         }
         if (isStaticPage(p, req)) { serveStatic(p, res, req); return; }
-        const publicStoreRoute = /^\/api\/store\/(catalog(?:\/[a-f0-9]{32}(?:\/cover)?)?|source-search|checkout|orders\/PH-[a-f0-9]{36}(?:\/verify)?|download\/[A-Za-z0-9_.-]+)$/.test(p);
+        const publicStoreRoute = /^\/api\/store\/(catalog(?:\/[a-f0-9]{32}(?:\/cover)?|\/categories)?|source-search|source-results\/[a-z0-9]{1,40}|checkout|orders\/PH-[a-f0-9]{36}(?:\/verify)?|download\/[A-Za-z0-9_.-]+|requests(?:\/RQ-[a-f0-9]{24})?|checkout\/momo|library(?:\/logout|\/passkeys\/(?:register|login)(?:-options)?)?)$/.test(p);
         if (!p.startsWith('/api/v1/') && me.role === 'none' && !publicStoreRoute) return fail(res, 'Sign in first', 401);
         if (me.role !== 'admin' && !p.startsWith('/api/v1/') && !OPEN.some(([re, meth]) => re.test(p) && (!meth || meth === req.method))) return fail(res, 'Only an admin can do that', 403);
 
         // Visitors share the server's libraries and its address's standing with them: 30 searches per 5 minutes each.
         if (me.role === 'visitor' && (p.startsWith('/search/') || p === '/api/store/source-search') && limited(`s|${me.ip}`, 30, 300e3)) return fail(res, 'That is a lot of searching. Wait a few minutes.', 429);
         if (p === '/api/store/checkout' && limited(`pagehouse-checkout|${ipOf(req)}`, 5, 300e3)) return fail(res, 'Too many checkout attempts. Wait a few minutes.', 429);
-        if (/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/.test(p) && limited(`pagehouse-verify|${ipOf(req)}`, 10, 300e3)) return fail(res, 'Too many payment verification attempts. Wait a few minutes.', 429);
+        if (p === '/api/store/checkout/momo' && limited(`pagehouse-momo|${ipOf(req)}`, 5, 300e3)) return fail(res, 'Too many payment attempts. Wait a few minutes.', 429);
+        if (p.startsWith('/api/store/library/') && limited(`pagehouse-library|${ipOf(req)}`, 30, 300e3)) return fail(res, 'Too many attempts. Wait a few minutes.', 429);
+        if (p.startsWith('/api/store/source-results/') && limited(`pagehouse-source-open|${ipOf(req)}`, 60, 300e3)) return fail(res, 'That is a lot of books opened. Wait a few minutes.', 429);
+        if (p === '/api/store/requests' && req.method === 'POST' && limited(`pagehouse-request|${ipOf(req)}`, 5, 3600e3)) return fail(res, 'Too many book requests from this address. Try again later.', 429);
+        if (p.startsWith('/api/store/requests/') && limited(`pagehouse-request-status|${ipOf(req)}`, 60, 300e3)) return fail(res, 'Too many status checks. Wait a few minutes.', 429);
+        if (/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/.test(p) && limited(`pagehouse-verify|${ipOf(req)}`, 60, 300e3)) return fail(res, 'Too many payment verification attempts. Wait a few minutes.', 429);
         // Links, covers and torrent files are fetched from other websites too. A results page asks for one link and
         // one cover per result (at most 80 covers ahead), so these sit far above what browsing results needs.
         if (me.role === 'visitor' && VISITOR_FETCHES.has(p) && limited(`${p}|${me.ip}`, VISITOR_FETCHES.get(p), 300e3)) return fail(res, 'That is a lot of requests. Wait a few minutes.', 429);
@@ -877,6 +1069,21 @@ server.listen(PORT, () => {
     ensureBrowser().catch(() => {});
     if (settings.vpn.enabled) checkVpn();
     refreshSlum();
+    if (supabaseConfigured()) {
+        const localBooks = pagehouse.catalogStats().total || 0;
+        if (localBooks === 0) {
+            pullDatabaseFromSupabase(pagehouse.db)
+                .then(r => console.log(`[supabase] hydrated ${r.hydrated} rows from Supabase PostgreSQL`))
+                .catch(e => console.warn('[supabase] initial pull failed:', e.message));
+        } else {
+            pushDatabaseToSupabase(pagehouse.db)
+                .then(r => console.log('[supabase] synced local database to Supabase:', JSON.stringify(r.tables)))
+                .catch(e => console.warn('[supabase] initial push failed:', e.message));
+        }
+        setInterval(() => {
+            pushDatabaseToSupabase(pagehouse.db).catch(() => {});
+        }, 5 * 60e3).unref();
+    }
     try { fs.mkdirSync(DATA, { recursive: true }); fs.accessSync(DATA, fs.constants.W_OK); }
     catch (e) { console.warn(`WARNING: ${DATA} is not writable, so settings and the shelf will not be saved. Fix the folder's owner (see README).`); }
 });

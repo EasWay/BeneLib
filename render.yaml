@@ -1,0 +1,46 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec)
+# Deploys the Pagehouse / RaveBSD backend server using the repo's Dockerfile.
+services:
+  - type: web
+    name: pagehouse-backend
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    disk:
+      name: pagehouse-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8080"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATA_DIR
+        value: /data
+      - key: BOOKS_DIR
+        value: /data/books
+      - key: AUDIOBOOKS_DIR
+        value: /data/audiobooks
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: pagehouse-books
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_WEBHOOK_SECRET
+        sync: false
+      - key: PAGEHOUSE_PUBLIC_URL
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: PAGEHOUSE_TOKEN_SECRET
+        generateValue: true
+      - key: PAGEHOUSE_LIBRARY_SECRET
+        generateValue: true

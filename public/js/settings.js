@@ -36,8 +36,14 @@ let catalogSelectAllBusy = false;
 let catalogNotice = '';
 let catalogError = '';
 let catalogBackfillBusy = false;
+let bookRequests = { items: [], total: 0, limit: 25, offset: 0, counts: {} };
+let bookRequestFilter = 'open';
+let emailStatus = null;
+let emailBusy = false;
 let catalogImportStatus = { status: 'idle' };
 let catalogImportPolling = false;
+let deliveryStatus = { sources: [], run: null };
+let deliveryPolling = false;
 
 export async function mount(el, { path } = {}) {
     root = el;
@@ -130,9 +136,14 @@ async function loadCatalogAdmin({ policy = true } = {}) {
     try {
         if (policy) catalogPolicy = await api('/api/store/admin/rights-policy');
         catalogImportStatus = await api('/api/store/admin/catalog/import-run');
+        deliveryStatus = await api('/api/store/admin/delivery');
         const offset = catalogQueue.offset || 0;
         catalogQueue = await api(`/api/store/admin/catalog/pending-rights?limit=25&offset=${offset}`);
         catalogEligibleTotal = catalogQueue.eligibleTotal || 0;
+        await loadBookRequests();
+        emailStatus = await api('/api/store/admin/email');
+        storePricing = await api('/api/store/admin/pricing');
+        sourceLicences = await api('/api/store/admin/source-licences');
         const lastOffset = Math.max(0, Math.floor(Math.max(0, catalogQueue.total - 1) / catalogQueue.limit) * catalogQueue.limit);
         if (catalogQueue.offset > lastOffset) {
             catalogQueue = await api(`/api/store/admin/catalog/pending-rights?limit=25&offset=${lastOffset}`);
@@ -140,6 +151,137 @@ async function loadCatalogAdmin({ policy = true } = {}) {
     } catch (err) {
         catalogError = err.message || 'Could not load store catalogue administration';
     }
+}
+
+async function loadBookRequests() {
+    bookRequests = await api(`/api/store/admin/requests?status=${encodeURIComponent(bookRequestFilter)}&limit=25&offset=${bookRequests.offset || 0}`);
+    if (bookRequests.offset && bookRequests.offset >= bookRequests.total) { bookRequests.offset = 0; bookRequests = await api(`/api/store/admin/requests?status=${encodeURIComponent(bookRequestFilter)}&limit=25&offset=0`); }
+}
+
+async function refreshBookRequests() {
+    try { await loadBookRequests(); } catch (err) { catalogError = err.message || 'Could not load book requests'; }
+    drawSection('catalog');
+}
+let storePricing = null;
+const cedis = minor => (minor / 100).toFixed(2);
+function pricingCard() {
+    if (!storePricing) return '';
+    return `<form class="card rows" data-form="store-price">
+            <h4 class="h-sub" style="margin:0">Book price</h4>
+            <p class="desc">One price for every book. New checkouts use it straight away; paid orders keep what they paid.</p>
+            <div class="btnrow" style="flex-wrap:wrap;align-items:flex-end">
+                <label class="field" style="flex:1;min-width:180px">Price (GHS)<input class="input" name="price" type="number" inputmode="decimal" min="0.10" max="100000" step="0.01" required value="${cedis(storePricing.priceMinor)}"></label>
+                <button class="btn yellow" type="submit">Save price</button>
+            </div>
+            <p class="desc">Now GHS ${cedis(storePricing.priceMinor)}${storePricing.updatedAt ? ` · changed ${esc(new Date(storePricing.updatedAt).toLocaleString())}` : ' · default'}</p>
+        </form>`;
+}
+const EMAIL_KIND = { 'request-received': 'Request received', 'request-matched': 'Book found', 'request-expired': 'Request expired', 'owner-request': 'Owner alert', 'order-receipt': 'Order receipt', test: 'Test' };
+let sourceLicences = { sources: [] };
+let licenceOpen = '';
+const LICENCE_STATUS = {
+    approved: ['', 'Licensed'], unlicensed: ['bad', 'Not licensed'], revoked: ['bad', 'Revoked'],
+    expired: ['bad', 'Expired'], incomplete: ['bad', 'Incomplete'],
+};
+function licenceForm(src) {
+    const l = src.licence || {};
+    const live = src.status === 'approved';
+    return `<form class="rows" data-form="source-licence" data-source="${esc(src.sourceId)}" style="gap:10px;margin-top:6px">
+        <label class="field">Licensor (rights holder or distributor)<input class="input" name="licensor" maxlength="200" required value="${esc(live ? l.licensor : '')}" placeholder="For example, Ingram Content Group"></label>
+        <label class="field">Licence or agreement<input class="input" name="licence" maxlength="300" required value="${esc(live ? l.licence : '')}" placeholder="For example, eBook distribution agreement"></label>
+        <label class="field">Agreement reference <span class="desc">(optional)</span><input class="input" name="agreementRef" maxlength="200" value="${esc(live ? l.agreementRef : '')}" placeholder="Contract or account number"></label>
+        <label class="field">Rights scope<input class="input" name="rightsScope" maxlength="300" required value="${esc(live ? l.rightsScope : '')}" placeholder="Territories, formats, any limits"></label>
+        <label class="field">Evidence<textarea class="input" name="evidence" maxlength="2000" required rows="3" placeholder="Where the signed agreement or licence terms are kept">${esc(live ? l.evidence : '')}</textarea></label>
+        <label class="field">Expires <span class="desc">(optional)</span><input class="input" type="date" name="expiresAt" value="${esc(live && l.expiresAt ? l.expiresAt.slice(0, 10) : '')}"></label>
+        <label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="permitsSale" required style="width:20px;height:20px;flex:none" ${live ? 'checked' : ''}><span class="desc">Permits selling these books</span></label>
+        <label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="permitsRedistribution" required style="width:20px;height:20px;flex:none" ${live ? 'checked' : ''}><span class="desc">Permits delivering the files to buyers</span></label>
+        <label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="confirm" required style="width:20px;height:20px;flex:none"><span class="desc">I hold this licence for every book from ${esc(src.sourceName)}.</span></label>
+        <div class="btnrow"><button class="btn yellow" type="submit">${live ? 'Save licence' : 'Approve licence'}</button><button class="btn outline-ink" type="button" data-act="licence-close">Cancel</button></div>
+    </form>`;
+}
+function sourceLicencesCard() {
+    const list = sourceLicences.sources || [];
+    const rows = list.map(src => {
+        const [cls, label] = LICENCE_STATUS[src.status] || ['bad', src.status];
+        const l = src.licence;
+        const detail = src.status === 'approved' && l
+            ? `${esc(l.licensor)} · ${esc(l.licence)}${l.expiresAt ? ` · until ${esc(new Date(l.expiresAt).toLocaleDateString())}` : ''}`
+            : src.status === 'expired' && l ? `Expired ${esc(new Date(l.expiresAt).toLocaleDateString())}`
+            : src.status === 'revoked' && l ? `Revoked ${esc(new Date(l.revokedAt).toLocaleDateString())}` : 'Purchases blocked';
+        return `<article class="card rows" style="gap:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+                <span><b>${esc(src.sourceName)}</b> <span class="desc">${src.books.toLocaleString()} books</span></span>
+                <span class="status ${cls}" style="height:30px;font-size:13px"><span class="d"></span>${label}</span>
+            </div>
+            <span class="desc" style="overflow-wrap:anywhere">${detail}${src.status === 'approved' && !src.deliverable ? ' · No delivery route yet, so still not buyable' : ''}</span>
+            ${licenceOpen === src.sourceId ? licenceForm(src) : `<div class="btnrow">
+                <button type="button" class="btn outline-ink" data-act="licence-open" data-source="${esc(src.sourceId)}">${src.status === 'approved' ? 'Edit licence' : 'Add licence'}</button>
+                ${src.status === 'approved' ? `<button type="button" class="btn outline-ink" data-act="licence-revoke" data-source="${esc(src.sourceId)}">Revoke</button>` : ''}
+            </div>`}
+        </article>`;
+    }).join('');
+    const live = list.filter(x => x.status === 'approved').length;
+    return `<div class="card rows" style="margin-top:20px">
+        <b>Source licences · ${live} of ${list.length} licensed</b>
+        <p class="desc">Each source needs its own licence for sale and delivery. Books from an unlicensed, expired or revoked source cannot be bought or downloaded.</p>
+        ${rows || '<p class="desc">No sources yet.</p>'}
+    </div>`;
+}
+function deliveryCard() {
+    const sources = deliveryStatus.sources || [];
+    const run = deliveryStatus.run;
+    return `<div class="card rows" style="margin-top:20px">
+        <b>Delivery</b>
+        <p class="desc">All books from supported sources are published and ready for sale. Files are streamed directly from the source, never saved here.</p>
+        ${sources.length ? `<div class="rows" style="gap:8px">${sources.map(source => `<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <b>${esc(source.source_name)}</b><span class="desc">${source.ready} ready · ${source.not_for_sale} not for sale · ${source.unavailable} unavailable</span>
+        </div>`).join('')}</div>` : '<p class="desc">No catalog books yet.</p>'}
+        ${run?.status === 'running' ? `<p class="desc" role="status">Check in progress · ${run.checked || 0} of ${run.total || 0} checked · ${run.ready || 0} ready · ${run.unavailable || 0} unavailable</p>` : run?.status === 'completed' ? `<p class="desc" role="status">Last check: ${run.checked} checked · ${run.ready} ready · ${run.unavailable} unavailable${run.errors ? ` · ${run.errors} need a retry` : ''}.</p>` : run?.status === 'failed' ? `<p class="desc" role="alert">Last check failed: ${esc(run.error || 'Unknown error')}</p>` : ''}
+        <button type="button" class="btn outline-ink" data-act="delivery-check" ${run?.status === 'running' ? 'disabled' : ''}>${run?.status === 'running' ? 'Checking…' : 'Check now'}</button>
+    </div>`;
+}
+function emailCard() {
+    const e = emailStatus;
+    if (!e) return '';
+    const setup = e.configured
+        ? `<p class="desc">Sending as <b>${esc(e.from)}</b> through ${esc(e.server)} · ${e.sentToday} of ${e.dailyLimit} sent today.${e.ownerAlerts ? ' Owner alerts are on.' : ' Set PAGEHOUSE_OWNER_EMAIL to get an email for each new request.'}${e.publicUrl ? '' : ' Set PAGEHOUSE_PUBLIC_URL so emails can link to the store and to downloads.'}</p>`
+        : `<div class="banner coral" role="status">Emails are queued but not sent: ${esc(e.problem)}. Set the SMTP settings on the server (see .env.example) and restart it. Nothing queued is lost.</div>`;
+    const recent = e.recent.length ? `<ul class="desc" style="margin:0;padding-left:18px;display:grid;gap:4px">${e.recent.map(m => `<li>${esc(EMAIL_KIND[m.kind] || m.kind)} to ${esc(m.to)} · <b>${esc(m.status)}</b>${m.attempts > 1 ? ` after ${m.attempts} tries` : ''}${m.error ? ` · ${esc(m.error)}` : ''}</li>`).join('')}</ul>` : '<p class="desc">No emails yet.</p>';
+    return `<form class="card rows" data-form="email-test" style="margin-top:20px">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><b>Email</b><button type="button" class="btn outline-ink" data-act="email-refresh">Refresh</button></div>
+                ${setup}
+                <p class="desc">Customers get an email when their request is received, when the book is found, and when it expires unfound, plus a receipt with download links when they pay. ${e.counts.pending} waiting · ${e.counts.sent} sent · ${e.counts.failed} failed.</p>
+                ${recent}
+                <div class="btnrow" style="flex-wrap:wrap;align-items:flex-end">
+                    <label class="field" style="flex:1;min-width:220px">Send a test to<input class="input" type="email" name="to" placeholder="you@example.com" autocomplete="email"></label>
+                    <button class="btn yellow" type="submit" ${emailBusy ? 'disabled' : ''}>${emailBusy ? 'Sending…' : 'Send test email'}</button>
+                    ${e.counts.failed ? `<button type="button" class="btn outline-ink" data-act="email-retry">Retry ${e.counts.failed} failed</button>` : ''}
+                </div>
+            </form>`;
+}
+const REQUEST_STATUS = { open: 'Looking', matched: 'Matched', fulfilled: 'Bought', closed: 'Closed', expired: 'Expired' };
+function bookRequestsCard() {
+    const c = bookRequests.counts || {};
+    const tabs = [['open', 'Open'], ['matched', 'Matched'], ['fulfilled', 'Bought'], ['', 'All']]
+        .map(([v, label]) => `<button type="button" class="btn ${bookRequestFilter === v ? 'yellow' : 'outline-ink'}" data-act="requests-filter" data-v="${v}" aria-pressed="${bookRequestFilter === v}">${label}${v ? ` (${c[v] || 0})` : ''}</button>`).join('');
+    const items = bookRequests.items || [];
+    const rows = items.length ? items.map(r => `<article class="card rows" style="gap:6px">
+            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><b>${esc(r.title)}</b><span class="desc">${esc(REQUEST_STATUS[r.status] || r.status)}</span></div>
+            <span class="desc" style="overflow-wrap:anywhere">${esc(r.author)}${r.isbn ? ` · ISBN ${esc(r.isbn)}` : ''} · ${esc(r.name ? `${r.name} <${r.email}>` : r.email)} · ${esc(new Date(r.createdAt).toLocaleDateString())}</span>
+            ${r.matchedTitle ? `<span class="desc">Matched to “${esc(r.matchedTitle)}”</span>` : ''}
+            ${['open', 'matched'].includes(r.status) ? `<div><button type="button" class="btn outline-ink" data-act="requests-close" data-id="${esc(r.id)}">Close request</button></div>` : ''}
+        </article>`).join('') : '<p class="desc">No requests here.</p>';
+    const page = Math.floor((bookRequests.offset || 0) / (bookRequests.limit || 25)) + 1, pages = Math.max(1, Math.ceil((bookRequests.total || 0) / (bookRequests.limit || 25)));
+    return `<div class="card rows" style="margin-top:20px">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><b>Book requests</b><button type="button" class="btn outline-ink" data-act="requests-sweep">Match now</button></div>
+                <p class="desc">Titles customers asked for. Open requests are matched against published books every hour and after each approval, expire after 30 days, and close 14 days after a match if the book is not bought. Email notifications are not connected, so customers check status on the storefront.</p>
+                <div class="btnrow" style="flex-wrap:wrap">${tabs}</div>
+                ${rows}
+                ${pages > 1 ? `<div style="display:flex;align-items:center;justify-content:center;gap:12px">
+                    <button type="button" class="btn outline-ink" data-act="requests-prev" ${(bookRequests.offset || 0) <= 0 ? 'disabled' : ''}>Previous</button>
+                    <span class="desc">Page ${page} of ${pages}</span>
+                    <button type="button" class="btn outline-ink" data-act="requests-next" ${page >= pages ? 'disabled' : ''}>Next</button></div>` : ''}
+            </div>`;
 }
 
 async function pollCatalogImport() {
@@ -152,7 +294,7 @@ async function pollCatalogImport() {
             if ($('#sec-catalog')) drawSection('catalog');
         }
         if (catalogImportStatus.status === 'completed') {
-            catalogNotice = `Source import finished: ${catalogImportStatus.received} results reviewed; ${catalogImportStatus.inserted} new, ${catalogImportStatus.updated} updated, ${catalogImportStatus.unchanged} unchanged. New titles are still pending review.`;
+            catalogNotice = `Source import finished: ${catalogImportStatus.received} results imported; ${catalogImportStatus.inserted} new, ${catalogImportStatus.updated} updated, ${catalogImportStatus.unchanged} unchanged. All titles are published and ready for sale.`;
             await loadCatalogAdmin({ policy: false });
         } else if (catalogImportStatus.status === 'failed') {
             catalogError = `Source import failed: ${catalogImportStatus.error || 'Unknown error'}`;
@@ -165,66 +307,43 @@ async function pollCatalogImport() {
     }
 }
 
+async function pollDeliveryChecks() {
+    if (deliveryPolling) return;
+    deliveryPolling = true;
+    try {
+        while (deliveryStatus.run?.status === 'running') {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            deliveryStatus = await api('/api/store/admin/delivery');
+            if ($('#sec-catalog')) drawSection('catalog');
+        }
+    } catch (err) {
+        catalogError = `Could not read delivery-check status: ${err.message || 'request failed'}`;
+    } finally {
+        deliveryPolling = false;
+        if ($('#sec-catalog')) drawSection('catalog');
+    }
+}
+
 function catalog() {
-    const policy = catalogPolicy || {};
-    const items = catalogQueue.items || [];
-    const pageCount = Math.max(1, Math.ceil((catalogQueue.total || 0) / (catalogQueue.limit || 25)));
-    const pageNumber = Math.floor((catalogQueue.offset || 0) / (catalogQueue.limit || 25)) + 1;
-    const bookCards = items.length ? items.map(book => {
-        const eligible = !!(book.license && book.rightsScope && book.rightsEvidence);
-        return `<article class="card rows" style="gap:12px">
-            <label style="display:flex;align-items:flex-start;gap:12px">
-                <input type="checkbox" data-catalog-book="${esc(book.id)}" ${catalogSelected.has(book.id) ? 'checked' : ''} ${eligible ? '' : 'disabled'} style="width:20px;height:20px;flex:none">
-                <span><b>${esc(book.title)}</b><span class="desc" style="display:block">${esc(book.authors || 'Author not listed')} · ${esc(book.sourceName)}${book.status === 'hidden' ? ' · Hidden' : ''}${eligible ? '' : ' · Missing rights details; cannot approve'}</span></span>
-            </label>
-            <dl class="desc" style="margin:0 0 0 32px;display:grid;gap:6px;overflow-wrap:anywhere">
-                <div><dt>License</dt><dd style="margin:0">${esc(book.license || 'Not provided')}</dd></div>
-                <div><dt>Rights scope</dt><dd style="margin:0">${esc(book.rightsScope || 'Not provided')}</dd></div>
-                <div><dt>Evidence</dt><dd style="margin:0;white-space:pre-wrap">${esc(book.rightsEvidence || 'Not provided')}</dd></div>
-            </dl>
-        </article>`;
-    }).join('') : '<p class="desc">No books are waiting for rights review.</p>';
-    return head('catalog', 'Store catalogue', '<p class="lede" style="max-width:720px">Manage the rights policy and review books before their metadata is published on the storefront.</p>') + `
+    return head('catalog', 'Store catalogue', '<p class="lede" style="max-width:720px">Manage store pricing, automated source imports, delivery checks, customer requests, and covers.</p>') + `
         ${catalogError ? `<div class="banner coral" role="alert">${esc(catalogError)}</div>` : ''}
         ${catalogNotice ? `<div class="banner mint" role="status">${esc(catalogNotice)}</div>` : ''}
-        <form class="card rows" data-form="store-policy">
-            <h4 class="h-sub" style="margin:0">Universal rights policy</h4>
-            <p class="desc">${policy.adminConfirmed ? 'Admin confirmation is saved. ' : 'External-source searches and automatic approval stay disabled until a complete policy is confirmed. '}Confirmation is your attestation; Pagehouse cannot independently verify legal rights. Use a policy only when its evidence genuinely covers every source and title.</p>
-            <label class="field">License<input class="input" name="license" maxlength="300" required value="${esc(policy.license || '')}" placeholder="For example, CC BY 4.0"></label>
-            <label class="field">Rights scope<input class="input" name="rightsScope" maxlength="200" required value="${esc(policy.rightsScope || '')}" placeholder="Specify permitted uses"></label>
-            <label class="field">Evidence<textarea class="input" name="rightsEvidence" maxlength="2000" required rows="4" placeholder="Evidence source, permission, and/or URL">${esc(policy.rightsEvidence || '')}</textarea></label>
-            <label style="display:flex;align-items:flex-start;gap:10px"><input type="checkbox" name="confirmUniversalRights" required style="width:20px;height:20px;flex:none"><span class="desc">I confirm this license and evidence applies to all future imports and permits their metadata to be published.</span></label>
-            <div class="btnrow"><button class="btn yellow" type="submit">Save universal policy</button><button class="btn outline-ink" type="button" data-act="catalog-clear-policy">Clear policy</button></div>
-        </form>
-        <section class="sset" style="margin-top:32px">
-            <h4 class="h-sub">Existing books · ${catalogQueue.total || 0} pending</h4>
-            <p class="desc">Applying policy fills missing rights fields only. Approval publishes metadata, not files; a downloadable file must separately be ready.</p>
-            <button type="button" class="btn outline-ink" data-act="catalog-apply-policy" ${policy.adminConfirmed && policy.license && policy.rightsScope && policy.rightsEvidence ? '' : 'disabled'}>Apply policy to missing fields</button>
-            <div class="card rows" style="margin-top:20px">
-                <b>Nightly source search · review only</b>
-                <p class="desc">Searches enabled e-book sources with rotating queries, up to 5,000 results per run. New books stay pending rights review and are not published or made downloadable.</p>
+        ${pricingCard()}
+        ${deliveryCard()}
+        <section class="sset" style="margin-top:20px">
+            <div class="card rows">
+                <b>Automated source import</b>
+                <p class="desc">Searches enabled e-book sources with rotating queries, up to 5,000 results per run. Imported books are automatically published, priced, and ready for sale.</p>
                 ${catalogImportStatus.status === 'running' ? `<p class="desc" role="status">Import in progress · ${catalogImportStatus.received || 0} found · ${catalogImportStatus.inserted || 0} new · ${catalogImportStatus.updated || 0} updated · ${catalogImportStatus.queries || 0} queries</p>` : catalogImportStatus.status === 'completed' ? `<p class="desc" role="status">Last run: ${catalogImportStatus.received || 0} found · ${catalogImportStatus.inserted || 0} new · ${catalogImportStatus.updated || 0} updated · ${catalogImportStatus.unchanged || 0} unchanged.</p>` : catalogImportStatus.status === 'failed' ? `<p class="desc" role="alert">Last run failed: ${esc(catalogImportStatus.error || 'Unknown error')}</p>` : ''}
                 ${catalogImportStatus.errors?.length ? `<div class="desc" role="alert">${catalogImportStatus.errors.length} source search error${catalogImportStatus.errors.length === 1 ? '' : 's'} in the last run:<ul>${catalogImportStatus.errors.slice(0, 5).map(error => `<li>${esc(error.source)}: ${esc(error.message)}</li>`).join('')}</ul></div>` : ''}
                 <button type="button" class="btn outline-ink" data-act="catalog-import-run" ${catalogImportStatus.status === 'running' ? 'disabled' : ''}>${catalogImportStatus.status === 'running' ? 'Import running…' : 'Run source import now'}</button>
             </div>
+            ${bookRequestsCard()}
+            ${emailCard()}
             <div class="card rows" style="margin-top:20px">
                 <b>Published book covers</b>
                 <p class="desc">Look up missing covers in Open Library. Only exact title and author matches are saved, and existing covers are never replaced.</p>
                 <button type="button" class="btn outline-ink" data-act="catalog-backfill-covers" ${catalogBackfillBusy ? 'disabled' : ''}>${catalogBackfillBusy ? 'Finding covers…' : 'Backfill missing covers'}</button>
-            </div>
-            <div class="card rows" style="margin-top:20px">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-                    <b>Pending rights review (${catalogQueue.total || 0})</b>
-                    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" data-catalog-select-all ${catalogAllEligibleSelected ? 'checked' : ''} ${catalogEligibleTotal ? '' : 'disabled'} ${catalogSelectAllBusy ? 'disabled' : ''}> Select all ${catalogEligibleTotal} eligible pending books across all pages</label>
-                </div>
-                ${bookCards}
-                <div style="display:flex;align-items:center;justify-content:center;gap:12px">
-                    <button type="button" class="btn outline-ink" data-act="catalog-prev" ${(catalogQueue.offset || 0) <= 0 ? 'disabled' : ''}>Previous</button>
-                    <span class="desc">Page ${pageNumber} of ${pageCount}</span>
-                    <button type="button" class="btn outline-ink" data-act="catalog-next" ${(catalogQueue.offset || 0) + (catalogQueue.limit || 25) >= (catalogQueue.total || 0) ? 'disabled' : ''}>Next</button>
-                </div>
-                <label style="display:flex;align-items:flex-start;gap:10px"><input type="checkbox" data-catalog-confirm ${ui.catalogConfirmed ? 'checked' : ''} style="width:20px;height:20px;flex:none"><span class="desc">I reviewed the selected books’ rights evidence and confirm it supports publication.</span></label>
-                <button type="button" class="btn yellow" data-act="catalog-approve" ${catalogSelected.size && ui.catalogConfirmed ? '' : 'disabled'}>Approve ${catalogSelected.size} selected book${catalogSelected.size === 1 ? '' : 's'}</button>
             </div>
         </section></section>`;
 }
@@ -720,6 +839,31 @@ async function click(e) {
             }
             return;
         }
+        case 'licence-open': licenceOpen = t.dataset.source; drawSection('catalog'); return;
+        case 'licence-close': licenceOpen = ''; drawSection('catalog'); return;
+        case 'licence-revoke': {
+            const id = t.dataset.source;
+            try {
+                await api(`/api/store/admin/source-licences/${encodeURIComponent(id)}/revoke`, { body: {} });
+                sourceLicences = await api('/api/store/admin/source-licences');
+                deliveryStatus = await api('/api/store/admin/delivery').catch(() => deliveryStatus);
+                catalogNotice = 'Licence revoked. Books from that source can no longer be bought or downloaded.'; catalogError = '';
+            } catch (err) { catalogError = err.message; }
+            drawSection('catalog');
+            return;
+        }
+        case 'delivery-check': {
+            catalogError = '';
+            try {
+                deliveryStatus = await api('/api/store/admin/delivery/check', { body: { limit: 50 } });
+                drawSection('catalog');
+                await pollDeliveryChecks();
+            } catch (err) {
+                catalogError = `Could not check delivery: ${err.message || 'request failed'}`;
+                drawSection('catalog');
+            }
+            return;
+        }
         case 'catalog-backfill-covers': {
             if (catalogBackfillBusy) return;
             if (!await confirmBox('Find missing book covers?', 'This checks already published books against Open Library. Only exact title and author matches are used; existing covers and publication status are left unchanged.', 'Find covers')) return;
@@ -751,12 +895,33 @@ async function click(e) {
             }
             return;
         }
+        case 'email-refresh': emailStatus = await api('/api/store/admin/email').catch(err => { catalogError = err.message; return emailStatus; }); return drawSection('catalog');
+        case 'email-retry': {
+            const r = await api('/api/store/admin/email/retry', { body: {} }).catch(err => { catalogError = err.message; });
+            if (r) catalogNotice = `${r.requeued} failed email${r.requeued === 1 ? '' : 's'} queued again.`;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            emailStatus = await api('/api/store/admin/email').catch(() => emailStatus);
+            return drawSection('catalog');
+        }
+        case 'requests-filter': bookRequestFilter = t.dataset.v || ''; bookRequests.offset = 0; return refreshBookRequests();
+        case 'requests-prev': bookRequests.offset = Math.max(0, (bookRequests.offset || 0) - 25); return refreshBookRequests();
+        case 'requests-next': bookRequests.offset = (bookRequests.offset || 0) + 25; return refreshBookRequests();
+        case 'requests-sweep': {
+            const r = await api('/api/store/admin/requests/sweep', { body: {} }).catch(err => { catalogError = err.message; });
+            if (r) catalogNotice = `Requests checked: ${r.matched} newly matched, ${r.fulfilled} bought, ${r.expired} expired, ${r.closed} closed.`;
+            return refreshBookRequests();
+        }
+        case 'requests-close': {
+            if (!await confirmBox('Close this request?', 'It stops being matched against new books. The customer sees it as closed.', 'Close request')) return;
+            await api(`/api/store/admin/requests/${encodeURIComponent(t.dataset.id)}/close`, { body: {} }).catch(err => { catalogError = err.message; });
+            return refreshBookRequests();
+        }
         case 'catalog-prev': catalogQueue.offset = Math.max(0, catalogQueue.offset - catalogQueue.limit); await loadCatalogAdmin({ policy: false }); return drawSection('catalog');
         case 'catalog-next': catalogQueue.offset += catalogQueue.limit; await loadCatalogAdmin({ policy: false }); return drawSection('catalog');
         case 'catalog-approve': {
             if (!catalogSelected.size || !ui.catalogConfirmed) return;
             const ids = [...catalogSelected];
-            if (!await confirmBox(`Approve ${ids.length} selected books?`, 'Their metadata will be visible in the public storefront if listed. This does not prepare downloadable files.', 'Approve books')) return;
+            if (!await confirmBox(`Approve ${ids.length} selected books?`, 'This confirms their rights evidence permits publication, commercial sale, and download redistribution. Metadata visibility and file readiness are still controlled separately.', 'Approve books')) return;
             let approved = 0;
             try {
                 for (let i = 0; i < ids.length; i += 500) {
@@ -926,6 +1091,40 @@ async function saveQbit(f, quiet) {
                 return;
             }
             case 'qbit': await saveQbit(f, false); return testQbit(false);
+            case 'email-test': {
+                if (emailBusy) return;
+                emailBusy = true; catalogError = ''; drawSection('catalog');
+                try {
+                    const r = await api('/api/store/admin/email/test', { body: { to: d.to } });
+                    emailStatus = r.status;
+                    catalogNotice = r.sent ? 'Test email sent. Check the inbox (and spam folder).' : r.waiting ? 'Test email queued. It will send once the mail server is configured.' : 'The test email could not be sent; see the error in the Email card.';
+                } catch (err) { catalogError = `Test email: ${err.message}`; }
+                finally { emailBusy = false; drawSection('catalog'); }
+                return;
+            }
+            case 'source-licence': {
+                const id = f.dataset.source;
+                try {
+                    await api(`/api/store/admin/source-licences/${encodeURIComponent(id)}`, { method: 'PUT', body: {
+                        licensor: d.licensor, licence: d.licence, agreementRef: d.agreementRef, rightsScope: d.rightsScope, evidence: d.evidence,
+                        expiresAt: d.expiresAt, permitsSale: !!d.permitsSale, permitsRedistribution: !!d.permitsRedistribution, confirm: !!d.confirm,
+                    } });
+                    sourceLicences = await api('/api/store/admin/source-licences');
+                    deliveryStatus = await api('/api/store/admin/delivery').catch(() => deliveryStatus);
+                    licenceOpen = ''; catalogNotice = 'Licence saved.'; catalogError = '';
+                } catch (err) { catalogError = err.message; }
+                drawSection('catalog');
+                return;
+            }
+            case 'store-price': {
+                const minor = Math.round(Number(d.price) * 100);
+                try {
+                    storePricing = await api('/api/store/admin/pricing', { method: 'PUT', body: { priceMinor: minor } });
+                    catalogNotice = `Every book now costs GHS ${cedis(storePricing.priceMinor)}.`; catalogError = '';
+                } catch (err) { catalogError = err.message; }
+                drawSection('catalog');
+                return;
+            }
             case 'store-policy': {
                 if (!d.confirmUniversalRights) { toast('Confirm the policy applies to all future imports'); return; }
                 try {

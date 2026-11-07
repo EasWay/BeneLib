@@ -61,9 +61,19 @@ function fetchDebug(event, details) {
     console.info(`[fetchPublic] ${event}`, details);
 }
 
-export async function fetchPublic(url, init = {}) {
+function hostAllowed(url, allowedHosts) {
+    if (!allowedHosts) return true;
+    const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+    return allowedHosts.some(value => {
+        const domain = String(value).toLowerCase().replace(/^\./, '').replace(/\.$/, '');
+        return host === domain || host.endsWith(`.${domain}`);
+    });
+}
+
+export async function fetchPublic(url, init = {}, { allowedHosts, fetchImpl = fetch } = {}) {
     let current = url;
     for (let hop = 0; hop <= 5; hop++) {
+        if (!hostAllowed(current, allowedHosts)) throw new Error('The file host is not allowed for this source');
         try {
             await assertPublicUrl(current);
         } catch (e) {
@@ -74,7 +84,7 @@ export async function fetchPublic(url, init = {}) {
         let res;
         try {
             fetchDebug('request', { hop, url: fetchDebugUrl(current) });
-            res = await fetch(current, { ...init, redirect: 'manual' });
+            res = await fetchImpl(current, { ...init, redirect: 'manual' });
         } catch (e) {
             fetchDebug('request-failed', { hop, url: fetchDebugUrl(current), error: e.code || e.name || 'Error' });
             throw e;

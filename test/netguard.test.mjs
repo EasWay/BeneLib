@@ -29,3 +29,17 @@ console.log('netguard: ok');
     assert.ok(pulled < 10, 'an endless body stops being read at the limit');
     console.log('netguard readCapped: ok');
 }
+
+{
+    const { fetchPublic } = await import('../src/netguard.js');
+    let requests = 0;
+    const fetchImpl = async () => { requests++; return new Response('ok'); };
+    assert.equal(await (await fetchPublic('https://8.8.8.8/file', {}, { allowedHosts: ['8.8.8.8'], fetchImpl })).text(), 'ok');
+    await assert.rejects(fetchPublic('https://8.8.8.8/file', {}, {
+        allowedHosts: ['8.8.8.8'],
+        fetchImpl: async () => new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1/private' } }),
+    }), /not allowed/);
+    await assert.rejects(fetchPublic('https://8.8.8.8/file', {}, { allowedHosts: ['example.com'], fetchImpl }), /not allowed/);
+    assert.equal(requests, 1, 'disallowed hosts are refused before another request is made');
+    console.log('netguard host allowlist: ok');
+}

@@ -254,3 +254,38 @@ export async function restartBrowser() {
     ctx = null;
     return browserAvailable();
 }
+
+// Renders a local file:// HTML document to a PDF file using an ephemeral headless Chromium instance.
+export async function renderHtmlFileToPdf(fileUrl, outputPath, timeoutMs = 45000) {
+    let browser = null;
+    try {
+        const pw = await playwright();
+        if (!pw || !(await browserAvailable())) return false;
+        const args = [...(process.env.BROWSER_IN_CONTAINER ? ['--disable-dev-shm-usage'] : []), '--disable-blink-features=AutomationControlled'];
+        try {
+            browser = await pw.chromium.launch({ headless: true, channel: 'chromium', chromiumSandbox: true, args });
+        } catch {
+            browser = await pw.chromium.launch({ headless: true, channel: 'chromium', chromiumSandbox: false, args });
+        }
+        const page = await browser.newPage();
+        await page.route('**/*', route => {
+            const u = route.request().url();
+            if (u.startsWith('file://') || u.startsWith('data:')) return route.continue();
+            return route.abort();
+        });
+        await page.goto(fileUrl, { waitUntil: 'load', timeout: timeoutMs }).catch(() => {});
+        await page.emulateMedia({ media: 'print' }).catch(() => {});
+        await page.pdf({
+            path: outputPath,
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '16mm', bottom: '16mm', left: '15mm', right: '15mm' },
+        });
+        return true;
+    } catch {
+        return false;
+    } finally {
+        if (browser) await browser.close().catch(() => {});
+    }
+}
+

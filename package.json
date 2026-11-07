@@ -6,8 +6,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node src/server.js",
-    "test": "node test/syntax.test.mjs && node test/sources.test.mjs && node test/rename.test.mjs && node test/slum.test.mjs && node test/netguard.test.mjs && node test/zip.test.mjs && node test/persist.test.mjs && node test/torrents.test.mjs && node test/access.test.mjs && node test/pagehouse.test.mjs && node test/pagehouse-import.test.mjs && node test/pagehouse-import-cli.test.mjs && node test/pagehouse-payments.test.mjs",
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "paystack:sim": "node --env-file-if-exists=.env scripts/paystack-sim.mjs",
+    "supabase:push": "node --env-file-if-exists=.env scripts/supabase-sync.mjs push",
+    "supabase:pull": "node --env-file-if-exists=.env scripts/supabase-sync.mjs pull",
+    "test": "node test/syntax.test.mjs && node test/sources.test.mjs && node test/rename.test.mjs && node test/slum.test.mjs && node test/netguard.test.mjs && node test/zip.test.mjs && node test/persist.test.mjs && node test/torrents.test.mjs && node test/access.test.mjs && node test/pagehouse.test.mjs && node test/pagehouse-import.test.mjs && node test/pagehouse-import-cli.test.mjs && node test/pagehouse-payments.test.mjs && node test/pagehouse-delivery.test.mjs && node test/paystack-sim.test.mjs && node test/pagehouse-requests.test.mjs && node test/smtp.test.mjs && node test/pagehouse-email.test.mjs && node test/pagehouse-source-results.test.mjs && node test/pagehouse-categories.test.mjs && node test/pagehouse-library.test.mjs",
     "postinstall": "node scripts/setup-browser.mjs"
   },
   "engines": {

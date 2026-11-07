@@ -18,6 +18,7 @@ import * as qbit from './qbit.js';
 import { vpnBlocks } from './vpn.js';
 import { listFiles, extractZip } from './zip.js';
 import { fetchPublic, readCapped } from './netguard.js';
+import { convertEpubFileToPdf } from './epub-pdf.js';
 
 export const events = new EventEmitter();
 events.setMaxListeners(200);
@@ -330,6 +331,15 @@ async function runDirect(j) {
                 if (!tracks.some(f => AUDIO_EXT.test(f))) throw new Error('The zip held no audio');
                 await fileIt(j, tracks, { srcRoot: unpacked });
             } finally { await fsp.rm(unpacked, { recursive: true, force: true }); await fsp.rm(j.part, { force: true }); }
+        } else if (j.kind === 'ebook' && (j.format === 'epub' || j.format === 'zip' || /\.(epub|zip)$/i.test(j.originalName || ''))) {
+            const pdfPart = path.join(incoming, j.id + '.pdf');
+            try {
+                await convertEpubFileToPdf(j.part, pdfPart, { title: j.title, author: j.author });
+                j.format = 'pdf';
+                if (j.originalName) j.originalName = j.originalName.replace(/\.(epub|zip)$/i, '.pdf');
+                j.size = (await fsp.stat(pdfPart)).size;
+                await fileIt(j, [pdfPart]);
+            } finally { await fsp.rm(pdfPart, { force: true }); await fsp.rm(j.part, { force: true }); }
         } else await fileIt(j, [j.part]);
     } catch (e) {
         clearTimeout(idle);

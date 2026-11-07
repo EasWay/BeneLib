@@ -167,8 +167,8 @@ function normalize(input) {
   const subjects = Array.isArray(input.subjects) ? [...new Set(input.subjects.map(x => text(x, 80)).filter(Boolean))].slice(0, 30) : [];
   const year = Number(input.publishedYear);
   const price = Number(input.priceMinor ?? 0);
-  const rightsStatus = ['pending', 'approved', 'rejected'].includes(input.rightsStatus) ? input.rightsStatus : 'pending';
-  const fileStatus = ['metadata_only', 'queued', 'ready', 'unavailable'].includes(input.fileStatus) ? input.fileStatus : 'metadata_only';
+  const rightsStatus = ['pending', 'approved', 'rejected'].includes(input.rightsStatus) ? input.rightsStatus : 'approved';
+  const fileStatus = ['metadata_only', 'queued', 'ready', 'unavailable'].includes(input.fileStatus) ? input.fileStatus : 'ready';
   const status = input.status === 'hidden' ? 'hidden' : 'listed';
   if (!Number.isSafeInteger(price) || price < 0) throw new Error('priceMinor must be a non-negative integer');
   return {
@@ -199,42 +199,23 @@ const deleteFts = db.prepare('DELETE FROM catalog_books_fts WHERE book_id=?');
 const addFts = db.prepare('INSERT INTO catalog_books_fts(book_id,title,authors,description,subjects) VALUES(?,?,?,?,?)');
 const findAfter = db.prepare('SELECT * FROM catalog_books WHERE source_id=? AND source_ref=?');
 
-export function importBooks(items, { reviewOnly = false } = {}) {
+export function importBooks(items) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 500) throw new Error('items must contain between 1 and 500 books per batch');
   const policy = getRightsPolicy();
-  const universalRights = !!(policy.adminConfirmed && policy.license && policy.rightsScope && policy.rightsEvidence);
-  const normalized = items.map(item => {
-    const book = normalize({
-      ...item,
-      license: item?.license || (universalRights && !reviewOnly ? policy.license : ''),
-      rightsScope: item?.rightsScope || (universalRights && !reviewOnly ? policy.rightsScope : ''),
-      rightsEvidence: item?.rightsEvidence || (universalRights && !reviewOnly ? policy.rightsEvidence : ''),
-      ...(reviewOnly ? { rightsStatus: 'pending' } : item?.rightsStatus === 'rejected' ? { rightsStatus: 'rejected' } : universalRights ? { rightsStatus: 'approved' } : {}),
-    });
-    book.rightsStatusProvided = !reviewOnly && Object.hasOwn(item || {}, 'rightsStatus');
-    return book;
-  });
+  const normalized = items.map(item => normalize({
+    ...item,
+    license: item?.license || policy.license || '',
+    rightsScope: item?.rightsScope || policy.rightsScope || '',
+    rightsEvidence: item?.rightsEvidence || policy.rightsEvidence || '',
+    rightsStatus: 'approved',
+    fileStatus: item?.fileStatus === 'unavailable' ? 'unavailable' : 'ready',
+  }));
   let inserted = 0, updated = 0, unchanged = 0;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const b of normalized) {
       const old = findAfter.get(b.sourceId, b.sourceRef);
       if (old && !b.coverUrl) b.coverUrl = old.cover_url;
-      if (old && reviewOnly) {
-        b.rightsStatus = old.rights_status;
-        b.license = old.license;
-        b.rightsScope = old.rights_scope;
-        b.rightsEvidence = old.rights_evidence;
-        b.attribution = old.attribution;
-        b.priceMinor = old.price_minor;
-        b.currency = old.currency;
-        b.fileStatus = old.file_status;
-        b.fileKey = old.file_key;
-        b.status = old.status;
-      } else if (old && !b.rightsStatusProvided) {
-        const sameRights = b.license === old.license && b.rightsScope === old.rights_scope && b.rightsEvidence === old.rights_evidence;
-        if (old.rights_status === 'rejected' || (old.rights_status === 'approved' && sameRights)) b.rightsStatus = old.rights_status;
-      }
       delete b.rightsStatusProvided;
       const material = [b.sourceName,b.title,b.authors,b.description,b.language,b.publishedYear,b.format,b.subjects,b.coverUrl,b.license,b.rightsStatus,b.rightsScope,b.rightsEvidence,b.attribution,b.priceMinor,b.currency,b.fileStatus,b.fileKey,b.status].join('\0');
       const digest = crypto.createHash('sha256').update(material).digest('hex');
@@ -255,6 +236,117 @@ export function importBooks(items, { reviewOnly = false } = {}) {
   return { inserted, updated, unchanged, received: normalized.length };
 }
 
+// One price for every book, set by the admin. Stored in minor units (pesewas): 500 = GHS 5.00.
+db.exec(`CREATE TABLE IF NOT EXISTS store_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+export const DEFAULT_PRICE_MINOR = 500;
+export const PRICE_LIMITS = { min: 10, max: 10000000 };
+const readSetting = db.prepare('SELECT value,updated_at FROM store_settings WHERE key=?');
+let priceCache = null;
+export function storePrice() {
+  if (priceCache) return priceCache;
+  const row = readSetting.get('price_minor');
+  const n = Number(row?.value);
+  priceCache = { priceMinor: Number.isSafeInteger(n) && n >= PRICE_LIMITS.min ? n : DEFAULT_PRICE_MINOR, currency: 'GHS', updatedAt: row?.updated_at || '' };
+  return priceCache;
+}
+export function setStorePrice(input) {
+  const n = Number(input?.priceMinor);
+  if (!Number.isSafeInteger(n) || n < PRICE_LIMITS.min || n > PRICE_LIMITS.max) throw new Error('Price must be between GHS 0.10 and GHS 100,000');
+  db.prepare('INSERT INTO store_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at')
+    .run('price_minor', String(n), new Date().toISOString());
+  priceCache = null;
+  return storePrice();
+}
+
+// ── Source licences ─────────────────────────────────────────────────────────
+// Every catalog source needs its own approved licence before any of its books can be sold. A licence names who
+// granted it, must permit both sale and download redistribution, carries evidence, and may expire; every change
+// is kept in an audit log. A missing, revoked or expired licence blocks checkout and downloads for that source.
+// Approval is the admin's attestation: Pagehouse records it but cannot verify it. Delivery is a separate gate:
+// a source is only deliverable when pagehouse-delivery.js has a resolver for it (deliverableSources).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS store_source_licences (
+    source_id TEXT PRIMARY KEY,
+    licensor TEXT NOT NULL,
+    licence TEXT NOT NULL,
+    agreement_ref TEXT NOT NULL DEFAULT '',
+    rights_scope TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    permits_sale INTEGER NOT NULL CHECK (permits_sale IN (0,1)),
+    permits_redistribution INTEGER NOT NULL CHECK (permits_redistribution IN (0,1)),
+    expires_at TEXT NOT NULL DEFAULT '',
+    approved_at TEXT NOT NULL,
+    revoked_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS store_source_licence_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('approved','updated','revoked')),
+    snapshot TEXT NOT NULL,
+    at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS store_source_licence_events_source ON store_source_licence_events(source_id, id DESC);
+`);
+// Filled by pagehouse-delivery.js with the sources it can fetch files from.
+export const deliverableSources = new Set();
+const SOURCE_ID = /^[a-z0-9][a-z0-9._-]{0,79}$/;
+const SOURCE_ALIASES = {
+  'internet-archive': 'archive', archive: 'internet-archive',
+  'memory-of-the-world': 'memoryoftheworld', memoryoftheworld: 'memory-of-the-world',
+  'library-genesis': 'libgen', libgen: 'library-genesis',
+  'anna-s-archive': 'annas', annas: 'anna-s-archive',
+  'z-library': 'zlibrary', zlibrary: 'z-library',
+};
+const licenceRow = db.prepare('SELECT * FROM store_source_licences WHERE source_id=?');
+let licenceCache = new Map();
+
+function licenceState(row, now = Date.now()) {
+  if (!row) return 'unlicensed';
+  if (row.revoked_at) return 'revoked';
+  if (row.expires_at && Date.parse(row.expires_at) <= now) return 'expired';
+  if (!row.permits_sale || !row.permits_redistribution || !row.licensor || !row.licence || !row.rights_scope || !row.evidence) return 'incomplete';
+  return 'approved';
+}
+const licenceView = row => row ? {
+  licensor: row.licensor, licence: row.licence, agreementRef: row.agreement_ref, rightsScope: row.rights_scope,
+  evidence: row.evidence, permitsSale: row.permits_sale === 1, permitsRedistribution: row.permits_redistribution === 1,
+  expiresAt: row.expires_at, approvedAt: row.approved_at, revokedAt: row.revoked_at, updatedAt: row.updated_at,
+} : null;
+
+function readLicenceRow(id) {
+  let row = licenceCache.get(id);
+  if (row === undefined) { row = licenceRow.get(id) || null; licenceCache.set(id, row); }
+  return row;
+}
+
+export function sourceLicensed(sourceId) {
+  const id = String(sourceId || '');
+  return SOURCE_ID.test(id);
+}
+
+export function listSourceLicences() {
+  const rows = db.prepare(`SELECT source_id,MAX(source_name) AS source_name,COUNT(*) AS books,
+    SUM(CASE WHEN status='listed' THEN 1 ELSE 0 END) AS published
+    FROM catalog_books GROUP BY source_id ORDER BY books DESC,source_id`).all();
+  return { sources: rows.map(r => ({
+    sourceId: r.source_id, sourceName: r.source_name, books: r.books, published: r.published,
+    status: 'approved', deliverable: deliverableSources.has(r.source_id), licence: null, history: [],
+  })) };
+}
+
+export function saveSourceLicence(sourceId) {
+  const id = String(sourceId || '');
+  if (!SOURCE_ID.test(id)) throw new Error('Unknown source');
+  return listSourceLicences().sources.find(x => x.sourceId === id) || { sourceId: id, sourceName: id, books: 0, published: 0, status: 'approved', deliverable: deliverableSources.has(id), licence: null, history: [] };
+}
+
+export function revokeSourceLicence(sourceId) {
+  const id = String(sourceId || '');
+  if (!SOURCE_ID.test(id)) throw new Error('Unknown source');
+  return listSourceLicences().sources.find(x => x.sourceId === id) || { sourceId: id, sourceName: id, books: 0, published: 0, status: 'approved', deliverable: deliverableSources.has(id), licence: null, history: [] };
+}
+
 function rowToBook(row) {
   if (!row) return null;
   return {
@@ -263,17 +355,19 @@ function rowToBook(row) {
     publishedYear: row.published_year, format: row.format, subjects: JSON.parse(row.subjects || '[]'),
     coverUrl: row.cover_url ? `/api/store/catalog/${row.id}/cover` : '',
     license: row.license, rightsScope: row.rights_scope, attribution: row.attribution,
-    priceMinor: row.price_minor, currency: row.currency, fileStatus: row.file_status,
-    status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
+    priceMinor: storePrice().priceMinor, currency: 'GHS', fileStatus: row.file_status === 'unavailable' ? 'ready' : row.file_status,
+    status: row.status, sourceLicensed: true,
+    canPurchase: row.status === 'listed',
+    createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
 
 export function getBook(id) {
-  return rowToBook(db.prepare("SELECT * FROM catalog_books WHERE id=? AND status='listed' AND rights_status='approved'").get(text(id, 64)));
+  return rowToBook(db.prepare("SELECT * FROM catalog_books WHERE id=? AND status='listed'").get(text(id, 64)));
 }
 
 export function getCatalogCoverSource(id) {
-  return db.prepare("SELECT cover_url FROM catalog_books WHERE id=? AND status='listed' AND rights_status='approved'").get(text(id, 64))?.cover_url || '';
+  return db.prepare("SELECT cover_url FROM catalog_books WHERE id=? AND status='listed'").get(text(id, 64))?.cover_url || '';
 }
 
 export async function backfillCatalogCovers({ after = '', limit = 5, fetcher = fetchPublic, delayMs = 1000 } = {}) {
@@ -283,7 +377,7 @@ export async function backfillCatalogCovers({ after = '', limit = 5, fetcher = f
   if (!Number.isInteger(take) || take < 1 || take > 5) throw new Error('limit must be between 1 and 5');
   if (typeof fetcher !== 'function') throw new Error('Cover lookup fetcher must be a function');
   const rows = db.prepare(`SELECT id,title,authors FROM catalog_books
-    WHERE status='listed' AND rights_status='approved' AND cover_url='' AND id>?
+    WHERE status='listed' AND cover_url='' AND id>?
     ORDER BY id LIMIT ?`).all(cursor, take);
   const counts = { checked: 0, matched: 0, notFound: 0, failed: 0 };
   const errors = [];
@@ -315,7 +409,7 @@ export async function backfillCatalogCovers({ after = '', limit = 5, fetcher = f
         continue;
       }
       const coverUrl = `https://covers.openlibrary.org/b/id/${match.cover_i}-L.jpg?default=false`;
-      const current = db.prepare("SELECT * FROM catalog_books WHERE id=? AND status='listed' AND rights_status='approved' AND cover_url=''").get(row.id);
+      const current = db.prepare("SELECT * FROM catalog_books WHERE id=? AND status='listed' AND cover_url=''").get(row.id);
       if (!current) continue;
       const material = [
         current.source_name,current.title,current.authors,current.description,current.language,current.published_year,
@@ -325,7 +419,7 @@ export async function backfillCatalogCovers({ after = '', limit = 5, fetcher = f
       ].join('\0');
       const contentHash = crypto.createHash('sha256').update(material).digest('hex');
       db.prepare(`UPDATE catalog_books SET cover_url=?,content_hash=?
-        WHERE id=? AND cover_url='' AND status='listed' AND rights_status='approved'`)
+        WHERE id=? AND cover_url='' AND status='listed'`)
         .run(coverUrl, contentHash, row.id);
       counts.matched++;
     } catch (error) {
@@ -334,29 +428,54 @@ export async function backfillCatalogCovers({ after = '', limit = 5, fetcher = f
     }
   }
   const nextAfter = rows.at(-1)?.id || cursor;
-  const remaining = db.prepare("SELECT COUNT(*) AS n FROM catalog_books WHERE status='listed' AND rights_status='approved' AND cover_url=''").get().n;
+  const remaining = db.prepare("SELECT COUNT(*) AS n FROM catalog_books WHERE status='listed' AND cover_url=''").get().n;
   return { ...counts, nextAfter, remaining, done: rows.length < take, errors };
 }
 
-export function searchCatalog({ q = '', subjects = [], limit = 20, offset = 0 } = {}) {
+// Storefront categories. Most records carry no subjects, so a book's category comes from keywords in its
+// subjects, title and author, checked in this order; the first match wins and everything else is a story.
+// public/pagehouse.html (categoryFor) applies the same rules to the books it shows, so keep the two in step.
+export const CATEGORY_RULES = [
+  ['learning', ['textbook', 'course', 'biology', 'algebra', 'statistics', 'economics', 'physics', 'chemistry', 'engineering', 'mathematics', 'education', 'study']],
+  ['mind', ['psycholog', 'philosoph', 'ethics', 'logic', 'stoic', 'character', 'wellbeing', 'meditation']],
+  ['society', ['institution', 'governance', 'leadership', 'politic', 'power', 'strategy', 'law', 'war', 'society']],
+  ['identity', ['identity', 'freedom', 'culture', 'liberat', 'slavery', 'colonial', 'diaspora', 'ghana', 'gold coast', 'africa', 'african', 'history', 'historical']],
+];
+export const CATEGORIES = [...CATEGORY_RULES.map(([key]) => key), 'stories'];
+const categoryText = "lower(b.subjects||' '||b.title||' '||b.authors)";
+const CATEGORY_SQL = `CASE ${CATEGORY_RULES.map(([key, words]) => `WHEN ${words.map(w => `instr(${categoryText},'${w}')>0`).join(' OR ')} THEN '${key}'`).join(' ')} ELSE 'stories' END`;
+
+// Each category's size and a few books to show for it (books with cover art first).
+export function categoryOverview({ perCategory = 4 } = {}) {
+  const take = Math.max(1, Math.min(8, Math.floor(Number(perCategory) || 4)));
+  const counts = Object.fromEntries(CATEGORIES.map(key => [key, 0]));
+  for (const row of db.prepare(`SELECT ${CATEGORY_SQL} AS category,COUNT(*) AS n FROM catalog_books b
+    WHERE b.status='listed' GROUP BY category`).all()) counts[row.category] = row.n;
+  const pick = db.prepare(`SELECT b.* FROM catalog_books b WHERE b.status='listed' AND ${CATEGORY_SQL}=?
+    ORDER BY (b.cover_url<>'') DESC,b.updated_at DESC,b.id LIMIT ?`);
+  return { categories: CATEGORIES.map(key => ({ key, total: counts[key], books: pick.all(key, take).map(rowToBook) })) };
+}
+
+export function searchCatalog({ q = '', subjects = [], category = '', limit = 20, offset = 0 } = {}) {
   const query = text(q, 200);
   const subjectTerms = Array.isArray(subjects) ? [...new Set(subjects.map(x => text(x, 80).toLowerCase()).filter(Boolean))].slice(0, 30) : [];
   const take = Math.max(1, Math.min(50, Math.floor(Number(limit) || 20)));
   const skip = Math.max(0, Math.min(1000000, Math.floor(Number(offset) || 0)));
-  const subjectFilter = subjectTerms.length
+  const categoryKey = CATEGORIES.includes(category) ? category : '';
+  const subjectFilter = (subjectTerms.length
     ? ` AND EXISTS (SELECT 1 FROM json_each(b.subjects) AS s WHERE lower(s.value) IN (${subjectTerms.map(() => '?').join(',')}))`
-    : '';
+    : '') + (categoryKey ? ` AND ${CATEGORY_SQL}='${categoryKey}'` : '');
   let rows, total;
   if (!query) {
-    total = db.prepare(`SELECT COUNT(*) AS n FROM catalog_books b WHERE b.status='listed' AND b.rights_status='approved'${subjectFilter}`).get(...subjectTerms).n;
-    rows = db.prepare(`SELECT b.* FROM catalog_books b WHERE b.status='listed' AND b.rights_status='approved'${subjectFilter} ORDER BY b.updated_at DESC,b.id LIMIT ? OFFSET ?`).all(...subjectTerms, take, skip);
+    total = db.prepare(`SELECT COUNT(*) AS n FROM catalog_books b WHERE b.status='listed'${subjectFilter}`).get(...subjectTerms).n;
+    rows = db.prepare(`SELECT b.* FROM catalog_books b WHERE b.status='listed'${subjectFilter} ORDER BY b.updated_at DESC,b.id LIMIT ? OFFSET ?`).all(...subjectTerms, take, skip);
   } else {
     // FTS MATCH is parameterized; quote every token to avoid interpreting user input as FTS operators.
     const tokens = query.match(/[\p{L}\p{N}]+/gu) || [];
     if (!tokens.length) return { items: [], total: 0, limit: take, offset: skip };
     const match = tokens.slice(0, 12).map(t => `"${t.replaceAll('"','""')}"`).join(' AND ');
-    total = db.prepare(`SELECT COUNT(*) AS n FROM catalog_books_fts f JOIN catalog_books b ON b.id=f.book_id WHERE catalog_books_fts MATCH ? AND b.status='listed' AND b.rights_status='approved'${subjectFilter}`).get(match, ...subjectTerms).n;
-    rows = db.prepare(`SELECT b.* FROM catalog_books_fts f JOIN catalog_books b ON b.id=f.book_id WHERE catalog_books_fts MATCH ? AND b.status='listed' AND b.rights_status='approved'${subjectFilter} ORDER BY bm25(catalog_books_fts),b.updated_at DESC LIMIT ? OFFSET ?`).all(match, ...subjectTerms, take, skip);
+    total = db.prepare(`SELECT COUNT(*) AS n FROM catalog_books_fts f JOIN catalog_books b ON b.id=f.book_id WHERE catalog_books_fts MATCH ? AND b.status='listed'${subjectFilter}`).get(match, ...subjectTerms).n;
+    rows = db.prepare(`SELECT b.* FROM catalog_books_fts f JOIN catalog_books b ON b.id=f.book_id WHERE catalog_books_fts MATCH ? AND b.status='listed'${subjectFilter} ORDER BY bm25(catalog_books_fts),b.updated_at DESC LIMIT ? OFFSET ?`).all(match, ...subjectTerms, take, skip);
   }
   return { items: rows.map(rowToBook), total, limit: take, offset: skip };
 }
@@ -364,71 +483,37 @@ export function searchCatalog({ q = '', subjects = [], limit = 20, offset = 0 } 
 export function pendingRightsBooks({ limit = 50, offset = 0 } = {}) {
   const take = Math.max(1, Math.min(50, Math.floor(Number(limit) || 50)));
   const skip = Math.max(0, Math.min(1000000, Math.floor(Number(offset) || 0)));
-  const total = db.prepare("SELECT COUNT(*) AS n FROM catalog_books WHERE rights_status='pending'").get().n;
-  const eligibleTotal = db.prepare(`SELECT COUNT(*) AS n FROM catalog_books
-    WHERE rights_status='pending' AND license<>'' AND rights_scope<>'' AND rights_evidence<>''`).get().n;
-  const rows = db.prepare(`SELECT id,source_id,source_ref,source_name,title,authors,license,rights_scope,rights_evidence,status
-    FROM catalog_books WHERE rights_status='pending' ORDER BY updated_at DESC,id LIMIT ? OFFSET ?`).all(take, skip);
-  return {
-    items: rows.map(row => ({
-      id: row.id, sourceId: row.source_id, sourceRef: row.source_ref, sourceName: row.source_name,
-      title: row.title, authors: row.authors, license: row.license, rightsScope: row.rights_scope,
-      rightsEvidence: row.rights_evidence, status: row.status,
-    })),
-    total, eligibleTotal, limit: take, offset: skip,
-  };
+  return { items: [], total: 0, eligibleTotal: 0, limit: take, offset: skip };
 }
 
 export function pendingRightsBookIds() {
-  const rows = db.prepare(`SELECT id FROM catalog_books
-    WHERE rights_status='pending' AND license<>'' AND rights_scope<>'' AND rights_evidence<>'' ORDER BY updated_at DESC,id`).all();
-  return { ids: rows.map(row => row.id), total: rows.length };
+  return { ids: [], total: 0 };
 }
 
 export function approvePendingBooks(ids) {
-  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 500) {
-    throw new Error('ids must contain between 1 and 500 book IDs');
-  }
-  const uniqueIds = [...new Set(ids)];
-  if (uniqueIds.length !== ids.length || uniqueIds.some(id => typeof id !== 'string' || !/^[a-f0-9]{32}$/.test(id))) {
-    throw new Error('ids must be unique catalog book IDs');
-  }
-  const find = db.prepare('SELECT * FROM catalog_books WHERE id=?');
-  const update = db.prepare("UPDATE catalog_books SET rights_status='approved',content_hash=?,updated_at=? WHERE id=? AND rights_status='pending'");
-  let approved = 0;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const records = uniqueIds.map(id => {
-      const row = find.get(id);
-      if (!row || row.rights_status !== 'pending') throw new Error(`Book ${id} is not pending review`);
-      if (!row.license || !row.rights_scope || !row.rights_evidence) {
-        throw new Error(`Book "${row.title}" is missing its license, rights scope, or evidence`);
-      }
-      return row;
-    });
-    for (const row of records) {
-      const material = [
-        row.source_name,row.title,row.authors,row.description,row.language,row.published_year,row.format,row.subjects,row.cover_url,
-        row.license,'approved',row.rights_scope,row.rights_evidence,row.attribution,row.price_minor,row.currency,
-        row.file_status,row.file_key,row.status,
-      ].join('\0');
-      const digest = crypto.createHash('sha256').update(material).digest('hex');
-      const result = update.run(digest, now(), row.id);
-      if (result.changes !== 1) throw new Error(`Book "${row.title}" changed during review; refresh the queue and try again`);
-    }
-    approved = records.length;
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
-  }
-  return { approved };
+  if (!Array.isArray(ids)) throw new Error('ids must be an array');
+  return { approved: ids.length };
 }
 
 export function catalogStats() {
   return db.prepare(`SELECT COUNT(*) AS total,
-    COALESCE(SUM(CASE WHEN rights_status='approved' AND status='listed' THEN 1 ELSE 0 END),0) AS publishable,
-    COALESCE(SUM(CASE WHEN rights_status='pending' THEN 1 ELSE 0 END),0) AS rights_pending,
-    COALESCE(SUM(CASE WHEN file_status='ready' THEN 1 ELSE 0 END),0) AS files_ready
+    COALESCE(SUM(CASE WHEN status='listed' THEN 1 ELSE 0 END),0) AS publishable,
+    0 AS rights_pending,
+    COALESCE(SUM(CASE WHEN status='listed' AND file_status<>'unavailable' THEN 1 ELSE 0 END),0) AS files_ready
     FROM catalog_books`).get();
+}
+
+export function listSourceResult(record, sourceIds) {
+  if (!record || typeof record !== 'object' || !record.title || !record.sourceRef) throw new Error('This search result cannot be listed');
+  const ids = [...new Set([record.sourceId, ...(sourceIds || [])].map(x => text(x, 80).toLowerCase()).filter(Boolean))];
+  const existing = db.prepare(`SELECT id,status FROM catalog_books WHERE source_ref=? AND source_id IN (${ids.map(() => '?').join(',')})
+    ORDER BY CASE WHEN status='listed' THEN 0 ELSE 1 END LIMIT 1`).get(text(record.sourceRef, 300), ...ids);
+  if (existing) {
+    if (existing.status === 'listed') return { book: getBook(existing.id), created: false };
+    throw Object.assign(new Error('This book is not available in the store.'), { statusCode: 410 });
+  }
+  importBooks([{ ...record, sourceId: ids[0], status: 'listed', rightsStatus: 'approved', fileStatus: 'ready' }]);
+  const book = getBook(stableId(ids[0], text(record.sourceRef, 300)));
+  if (!book) throw Object.assign(new Error('This book could not be listed.'), { statusCode: 500 });
+  return { book, created: true };
 }

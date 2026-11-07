@@ -217,7 +217,7 @@ function renderDiscover() {
                     <div class="tot"><span>Total</span><b id="bagTot">GH₵ 0.00</b></div>
                     <a class="btn wide" href="#checkout">Checkout</a>
                   </section>
-                  <a class="box reqbox" href="#request"><b>Can’t find a book?</b><span>Send the title and we’ll email you if it’s added within 30 days.</span><u>Request it →</u></a>
+                  <a class="box reqbox" href="#request"><b>Can’t find a book?</b><span>Send the title and we’ll keep looking for it for 30 days.</span><u>Request it →</u></a>
                 </aside>
                 <div class="box mainbox">
                   <div class="toolbar">
@@ -252,7 +252,7 @@ function renderDiscover() {
               <div class="steps">
                 <div class="step"><span class="eyebrow">Step 1</span><b>Explore the collection</b><span>Browse by subject or search for a title or author.</span></div>
                 <div class="step"><span class="eyebrow">Step 2</span><b>Choose a book</b><span>Open a title to see its description and details.</span></div>
-                <div class="step"><span class="eyebrow">Step 3</span><b>Ordering is coming soon</b><span>Online checkout and book requests are not available yet.</span></div>
+                <div class="step"><span class="eyebrow">Step 3</span><b>Can’t find it? Request it</b><span>Send the title and author and we’ll look for it for 30 days.</span></div>
               </div>
             </div>
           </section>
@@ -261,7 +261,7 @@ function renderDiscover() {
             <div class="wrap two store-wrap">
               <div class="sec-head" style="flex-direction:column;align-items:flex-start;margin:0">
                 <div><span class="eyebrow">Requests</span><h2 id="reqH">Can’t find a book?</h2></div>
-                <p>Share the title and author you are looking for. The request form is not connected yet, so your request will not be sent.</p>
+                <p>Share the title and author you are looking for. We check new additions against your request every day for 30 days.</p>
               </div>
               <form class="card" id="reqForm">
                 <div class="field"><label for="r-title">Book title</label><input id="r-title" required placeholder="e.g. The Book of Disquiet"></div>
@@ -273,8 +273,8 @@ function renderDiscover() {
                   <div class="field"><label for="r-name">Your name</label><input id="r-name" autocomplete="name" required></div>
                   <div class="field"><label for="r-email">Email</label><input id="r-email" type="email" autocomplete="email" required></div>
                 </div>
-                <button class="btn wide" type="submit">Send request</button>
-                <p class="done" id="reqDone" hidden>Book requests are not available yet. Your request was not sent.</p>
+                <button class="btn wide" type="submit" id="reqBtn">Send request</button>
+                <p class="done" id="reqDone" role="status" aria-live="polite" hidden></p>
               </form>
             </div>
           </section>
@@ -591,11 +591,26 @@ function initPagehouseStore() {
         if (dlg) { dlg.hidden = true; document.documentElement.style.overflow = ''; }
         scrollToSection('checkout');
     });
-    document.getElementById('reqForm')?.addEventListener('submit', e => {
+    document.getElementById('reqForm')?.addEventListener('submit', async e => {
         e.preventDefault();
-        const message = document.getElementById('reqDone');
-        message.textContent = 'Book requests are not available yet. Your request was not sent.';
-        message.hidden = false;
+        const message = document.getElementById('reqDone'), button = document.getElementById('reqBtn');
+        const value = id => document.getElementById(id).value.trim();
+        const body = { title: value('r-title'), author: value('r-author'), isbn: value('r-isbn'), name: value('r-name'), email: value('r-email').toLowerCase() };
+        button.disabled = true;
+        try {
+            const res = await fetch('/api/store/requests', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Your request could not be sent.');
+            message.textContent = data.status === 'matched' ? `Good news: “${data.book?.title || body.title}” is already in the catalogue.`
+                : data.duplicate ? 'You have already asked for this book. We are still looking.'
+                : 'Request received. We’ll check new additions against it every day for the next 30 days.';
+            if (!data.duplicate) e.target.reset();
+        } catch (err) {
+            message.textContent = err.message || 'Your request could not be sent.';
+        } finally {
+            message.hidden = false;
+            button.disabled = false;
+        }
     });
     storefront.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', () => {
         const dlg = document.getElementById('dlg'); if (dlg) { dlg.hidden = true; document.documentElement.style.overflow = ''; }

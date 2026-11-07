@@ -1,0 +1,24 @@
+Plan for buy button. (not built yet)
+
+1. Delivery with no stored files
+- When a buyer clicks download, the server fetches the file from where it's hosted and streams it straight to them. It goes through in pieces, so it never sits on disk or in memory.
+- Each source gets a small resolver that turns a catalog entry into its direct file address.
+
+2. Check before charging
+- A background job checks books a few at a time, politely per site. It confirms each file exists, finds its size and type, and records the result.
+- Checkout checks every book in the bag again if its last check is more than about 7 days old, so nobody pays for a link that has died.
+
+3. Safe streaming
+- Downloads only go to an allowlist of hosts for each source, using the existing private-network guard.
+- The first bytes must look like a real file (%PDF or the EPUB/ZIP header) before anything reaches the buyer. If the site returns an error page or a login wall, the download stops, it doesn't count against the buyer's limit, and the book is marked for a recheck.
+- Resuming a broken download within the hour doesn't use up a download. Each file's size is recorded after its first delivery, so a changed file triggers a recheck.
+
+4. Admin panel
+- A Delivery card shows ready / not for sale / unavailable counts by source, with a "Check now" button.
+
+5. Payment simulator
+- A local fake Paystack so you can test the whole flow before you have Paystack keys: card checkout page, a "phone" page to approve or decline MoMo, and signed webhooks.
+- I've already made the small change it needs: the server accepts a Paystack address on localhost only, set with PAYSTACK_API_BASE.
+
+
+Something like this kind of existed in the server, for downloading the books from the sources, check and lets see. if not, then build.

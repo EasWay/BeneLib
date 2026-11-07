@@ -14,6 +14,10 @@ fs.mkdirSync(process.env.PAGEHOUSE_FILES_DIR, { recursive: true });
 const catalog = await import('../src/pagehouse.js');
 const payments = await import('../src/pagehouse-payments.js');
 
+catalog.saveRightsPolicy({
+  license: 'CC BY 4.0', rightsScope: 'commercial redistribution',
+  rightsEvidence: 'Test fixture license', confirmUniversalRights: true,
+});
 const book = {
   sourceId: 'catalog', sourceRef: 'payment-test-book', sourceName: 'Catalog', title: 'Test Book', authors: 'A Writer',
   license: 'Test permitted use', rightsStatus: 'approved', rightsScope: 'test', rightsEvidence: 'test fixture',
@@ -37,7 +41,17 @@ const fakePaystack = async (url, options) => {
 };
 
 try {
+  // One price for every book, set by the admin: the book's own price field is ignored.
+  assert.equal(catalog.storePrice().priceMinor, 500, 'GHS 5 until the admin changes it');
+  assert.equal(catalog.getBook(id).priceMinor, 500);
+  for (const bad of [0, 9, 10000001, 5.5, 'abc', null]) assert.throws(() => catalog.setStorePrice({ priceMinor: bad }), /between GHS 0.10/);
+  assert.equal(catalog.setStorePrice({ priceMinor: 575 }).priceMinor, 575);
+  assert.equal(catalog.getBook(id).priceMinor, 575, 'the storefront shows the new price at once');
+  // Every listed book with a deliverable file is immediately buyable without source licence gates.
   const checkout = { bookIds: [id], email: 'reader@example.test', idempotencyKey: 'test-checkout-key-0001' };
+  assert.equal(catalog.getBook(id).canPurchase, true, 'imported books are immediately buyable on the storefront');
+  assert.equal(catalog.sourceLicensed('catalog'), true);
+  assert.equal(catalog.sourceLicensed('zlibrary'), true);
   const started = await payments.createCheckout(checkout, fakePaystack);
   assert.equal(started.status, 'pending');
   assert.equal(started.authorizationUrl, 'https://checkout.paystack.com/test');
@@ -58,6 +72,8 @@ try {
   for (let i = 0; i < 4; i++) assert.ok(payments.consumeDownloadToken(token));
   assert.equal(payments.consumeDownloadToken(token), null, 'sixth use is denied after five allowed uses');
   assert.equal(payments.consumeDownloadToken(token + 'tampered'), null);
+
+  assert.ok(payments.getDownloadGrant(token) !== undefined);
 
   const eventBody = JSON.stringify({ event: 'charge.success', data: { reference: started.reference } });
   const signature = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY).update(eventBody).digest('hex');
