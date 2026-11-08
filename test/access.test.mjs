@@ -249,6 +249,10 @@ for (const mode of ['public', 'family']) {
         const publishedReview = await s.call('GET', '/api/store/catalog?q=awaiting%20review', { cookie: s.admin });
         assert.equal(publishedReview.json.total, 1, mode + ' imported book is auto-published');
         assert.equal(publishedReview.json.items[0].coverUrl, `/api/store/catalog/${publishedReview.json.items[0].id}/cover`, mode + ' imported cover is retained on publication');
+        for (const [role, cookie] of Object.entries(roles)) {
+            const coverRes = await s.call('GET', publishedReview.json.items[0].coverUrl, { cookie });
+            assert.ok(coverRes.status !== 401 && coverRes.status !== 403, `${mode} ${role} may fetch catalogue cover`);
+        }
         assert.ok((await s.call('GET', '/api/settings', { cookie: s.admin })).json.shelves.ebookDir, mode + ' admin sees folders');
         // A settings patch cannot reopen setup (which would make everyone the admin).
         await s.call('POST', '/api/settings', { body: { setupDone: false }, cookie: s.admin });

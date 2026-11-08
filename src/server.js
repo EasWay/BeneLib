@@ -149,7 +149,7 @@ const OPEN = [
     [/^\/api\/(settings|status)$/, 'GET'], [/^\/api\/downloads$/, 'POST'], [/^\/api\/jobs\/[a-f0-9]+$/, 'DELETE'],
     [/^\/api\/jobs\/[a-f0-9]+\/retry$/, 'POST'], [/^\/api\/shelf$/, 'GET'], [/^\/api\/shelf\/delete$/, 'POST'],
     [/^\/api\/shelf\/[a-f0-9]+\/forget$/, 'POST'], [/^\/api\/me\/password$/, 'POST'], [/^\/api\/logout$/, 'POST'],
-    [/^\/api\/store\/catalog$/, 'GET'], [/^\/api\/store\/catalog\/categories$/, 'GET'], [/^\/api\/store\/catalog\/[a-f0-9]{32}$/, 'GET'],
+    [/^\/api\/store\/catalog$/, 'GET'], [/^\/api\/store\/catalog\/categories$/, 'GET'], [/^\/api\/store\/catalog\/[a-f0-9]{32}(?:\/cover)?$/, 'GET'],
     [/^\/api\/store\/source-search$/, 'GET'], [/^\/api\/store\/source-results\/[a-z0-9]{1,40}$/, 'POST'],
     [/^\/api\/store\/checkout$/, 'POST'], [/^\/api\/store\/orders\/PH-[a-f0-9]{36}$/, 'GET'],
     [/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/, 'POST'], [/^\/api\/store\/download\/[A-Za-z0-9_.-]+$/, 'GET'],
@@ -793,6 +793,7 @@ async function sendCoverSource(res, src) {
     let sourceHost = '';
     try { sourceHost = new URL(src).hostname.toLowerCase(); } catch { res.writeHead(404).end(); return; }
     let hit = covers.get(src);
+    if (hit && hit.missing && Date.now() - (hit.at || 0) > 60e3) { covers.delete(src); hit = null; }
     if (!hit) {
         try {
             const r = await fetchPublic(src, { headers: { 'User-Agent': currentUA(), Accept: 'image/*' }, signal: AbortSignal.timeout(8000) });
@@ -801,7 +802,7 @@ async function sendCoverSource(res, src) {
                 && /^image\/svg\+xml(?:;|$)/i.test(type);
             if (!r.ok || (!/^image\/(jpeg|png|webp|gif|avif)(?:;|$)/i.test(type) && !svg)) { if (r.body) r.body.cancel().catch(() => {}); throw new Error('not an image'); }
             hit = { type, buf: await readCapped(r, 3e6) };
-        } catch (e) { hit = { missing: true }; }
+        } catch (e) { hit = { missing: true, at: Date.now() }; }
         covers.set(src, hit);
         coverBytes += hit.buf ? hit.buf.length : 0;
         // Oldest first, until under the size limit (about 40 MB) and 300 covers.
@@ -811,7 +812,7 @@ async function sendCoverSource(res, src) {
         }
     }
     // Kept by the browser too, so a redrawn list does not ask again for covers that are not there.
-    if (hit.missing) { res.writeHead(404, { 'Cache-Control': 'private, max-age=3600' }).end(); return; }
+    if (hit.missing) { res.writeHead(404, { 'Cache-Control': 'private, max-age=60' }).end(); return; }
     const svgSecurity = /^image\/svg\+xml(?:;|$)/i.test(hit.type)
         ? { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {};
     res.writeHead(200, { 'Content-Type': hit.type, 'Cache-Control': 'private, max-age=3600', ...SECURITY, ...svgSecurity }).end(hit.buf);

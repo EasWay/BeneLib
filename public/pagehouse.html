@@ -149,16 +149,16 @@ aside.side{position:sticky;top:92px;display:flex;flex-direction:column;gap:16px}
   transition:transform .45s cubic-bezier(.2,.8,.2,1),box-shadow .45s cubic-bezier(.2,.8,.2,1)}
 .bk::before{content:"";position:absolute;inset:7px 7px 7px 10px;border:1px solid currentColor;opacity:.22;border-radius:1px;pointer-events:none}
 .bk::after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,rgba(255,255,255,.14) 0%,rgba(255,255,255,0) 28%,rgba(0,0,0,0) 70%,rgba(0,0,0,.12) 100%);pointer-events:none}
-.bk.has-art{background:var(--well)!important}
-.bk.has-art::before{display:none}
-.bk.has-art::after{z-index:2;background:linear-gradient(90deg,rgba(0,0,0,.16),rgba(255,255,255,.06) 4%,transparent 14%,transparent 92%,rgba(0,0,0,.08))}
+.bk.art-ready{background:var(--well)!important}
+.bk.art-ready::before{display:none}
+.bk.art-ready::after{z-index:2;background:linear-gradient(90deg,rgba(0,0,0,.16),rgba(255,255,255,.06) 4%,transparent 14%,transparent 92%,rgba(0,0,0,.08))}
 /* A cover from the book's source fills the whole book. Covers far from book proportions (scans, banners, square
    thumbnails) sit whole on a blurred, darkened copy of themselves, never on the generated cover's colour. */
 .bk .bk-art{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease}
 .bk.art-ready .bk-art{opacity:1}
 .bk.art-odd .bk-art{object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
 .bk.art-odd::before{display:block;content:"";inset:-12%;border:0;border-radius:0;opacity:1;background:#2a2622 var(--art) center/cover no-repeat;filter:blur(10px) brightness(.62) saturate(1.15)}
-.bk.has-art .a,.bk.has-art .t,.bk.has-art .ed{display:none}
+.bk.art-ready .a,.bk.art-ready .t,.bk.art-ready .ed{display:none}
 .bk .a,.bk .t,.bk .ed{z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.62)}
 button.bk:hover{transform:translateY(-10px);box-shadow:inset 3px 0 0 rgba(0,0,0,.18),inset 5px 0 6px -3px rgba(255,255,255,.12),14px 18px 24px -10px rgba(30,20,10,.45)}
 .bk .a{position:relative;font-family:var(--mono);font-size:7px;font-size:6.2cqi;letter-spacing:.14em;text-transform:uppercase;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
@@ -746,7 +746,6 @@ function coverImageFor(book){
 function fromApi(x){
   var c = categoryFor(x), colors = {identity:['#1F3B2D','#EFE9DC'],society:['#9A5B2C','#FBF1E6'],mind:['#4E3360','#F3EEF6'],learning:['#22385A','#EAF0F8'],stories:['#6E2A1C','#F4E9E1']}[c];
   var book={id:String(x.id),t:String(x.title || 'Untitled'),a:String(x.authors || 'Author unknown'),y:x.publishedYear,c:c,s:[],bg:colors[0],fg:colors[1],d:String(x.description || 'A book in the Quiet Chapters catalogue.'),priceMinor:Number(x.priceMinor)||0,currency:String(x.currency||'GHS'),fileStatus:String(x.fileStatus||'ready'),canPurchase:x.canPurchase!==false,format:String(x.format||''),subjects:Array.isArray(x.subjects)?x.subjects:[],coverUrl:String(x.coverUrl||'')};
-  if(book.coverUrl)coverImageFor(book);
   return book;
 }
 function isBuyable(b){ return !!b && b.priceMinor > 0 && b.currency === 'GHS'; }
@@ -759,9 +758,10 @@ function titleClass(t){ var n=titleWeight(t); return n<=10?'t1':n<=20?'t2':n<=34
 // A real cover, once loaded: fill the book when it is roughly book-shaped, otherwise show it whole on a blurred copy.
 // Anything tiny is a tracking pixel or "no cover" placeholder, and the generated cover takes over.
 window.phArtLoad = function(img){
-  var bk = img.parentNode, w = img.naturalWidth, h = img.naturalHeight;
+  var bk = img.parentNode, w = img.naturalWidth, h = img.naturalHeight, src = img.getAttribute('src');
   if (!bk) return;
   if (w < 20 || h < 20) { window.phArtFail(img); return; }
+  if (src && (!coverImages[src] || !coverImages[src].ready)) coverImages[src] = { image: img, ready: true, failed: false };
   var r = w / h;
   if (!coverFills(r)) { bk.classList.add('art-odd'); bk.style.setProperty('--art', 'url("' + String(img.currentSrc || img.src).replace(/["\\\n]/g, encodeURIComponent) + '")'); }
   bk.classList.add('art-ready');
@@ -776,8 +776,8 @@ function coverBtn(b, span){
   var foil = lum(b.bg) < 0.32 ? ' foil' : '', tag = span ? 'span' : 'button', state = b.coverUrl && coverImages[b.coverUrl];
   var art = b.coverUrl && !(state && state.failed);
   return '<' + tag + (span ? '' : ' type="button"') + ' class="bk' + foil + (art?' has-art':'') + '" data-id="' + esc(b.id) + '" style="background:' + b.bg + ';color:' + b.fg + '"' + (span ? '' : ' aria-label="Open ' + esc(b.t) + ' by ' + esc(b.a) + ', ' + fmt(priceFor(b)) + '"') + '>' +
-    (art?'<img class="bk-art" src="'+esc(b.coverUrl)+'" alt="" loading="lazy" decoding="async" onload="phArtLoad(this)" onerror="phArtFail(this)">':'')+
-    '<span class="a">' + esc(b.a) + '</span><span class="t ' + titleClass(b.t) + '">' + esc(b.t) + '</span><span class="ed">PAGEHOUSE</span></' + tag + '>';
+    (art?'<img class="bk-art" src="'+esc(b.coverUrl)+'" alt="" decoding="async" onload="phArtLoad(this)" onerror="phArtFail(this)">':'')+
+    '<span class="a">' + esc(b.a) + '</span><span class="t ' + titleClass(b.t) + '">' + esc(b.t) + '</span><span class="ed">QUIET CHAPTERS</span></' + tag + '>';
 }
 
 /* ---------------- store UI ---------------- */
@@ -1298,7 +1298,7 @@ function paintCover(b, rough){
     } else {
       // Far from book-shaped: the whole cover on a blurred, darkened copy of itself.
       x.fillStyle='#2a2622';x.fillRect(0,0,TW,TH);
-      x.save();x.filter='blur(36px) brightness(.62) saturate(1.15)';
+      x.save();try{x.filter='blur(36px) brightness(.62) saturate(1.15)';}catch(_){}
       var over=fill*1.15;x.drawImage(sourceCover,(TW-iw*over)/2,(TH-ih*over)/2,iw*over,ih*over);
       x.restore();
       var fit=Math.min((TW-80)/iw,(TH-80)/ih),w=iw*fit,h=ih*fit;
@@ -1589,7 +1589,8 @@ function openViewer(el){
   vstage.style.background = '';
   if (gl) fontsReady.then(function(){
     try {
-      if (!viewer) { viewer = Stage(document.getElementById('viewGL'), {dpr: 2, shadow: 2048}); window.addEventListener('resize', function(){ if (viewer) { viewer.resize(); kick(); } }); }
+      var mob = window.innerWidth < 760;
+      if (!viewer) { viewer = Stage(document.getElementById('viewGL'), {dpr: mob ? 1.5 : 2, shadow: mob ? 1024 : 2048}); window.addEventListener('resize', function(){ if (viewer) { viewer.resize(); kick(); } }); }
       viewer.setBook(current); viewer.resize(); kick();
     } catch (e) { viewer = null; vstage.style.background = current.bg; }
   }); else vstage.style.background = current.bg;
