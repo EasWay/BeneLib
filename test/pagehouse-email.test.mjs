@@ -43,7 +43,7 @@ try {
   const open = requests.createRequest({ title: 'Arrow of <b>God</b>', author: 'Chinua Achebe', email: 'Ama@Example.test', name: 'Ama' });
   assert.deepEqual(outbox().map(m => [m.kind, m.to_email, m.status]), [['request-received', 'ama@example.test', 'pending'], ['owner-request', 'owner@example.test', 'pending']]);
   assert.equal(email.isConfigured(), false);
-  assert.equal(email.outboxStatus().problem, 'SMTP_HOST is not set');
+  assert.equal(email.outboxStatus().problem, 'SMTP_HOST or BREVO_API_KEY is not set');
   process.env.SMTP_HOST = 'smtp.example.test'; process.env.SMTP_SECURE = 'none';
   assert.match(email.outboxStatus().problem, /only allowed for a mail server on this machine/);
   process.env.SMTP_SECURE = 'starttls'; process.env.SMTP_USER = 'u';
