@@ -52,8 +52,13 @@ export function emailConfig() {
   const limit = Number(process.env.PAGEHOUSE_EMAIL_DAILY_LIMIT || 300);
   const secure = String(process.env.SMTP_SECURE || 'starttls').trim().toLowerCase();
   const host = String(process.env.SMTP_HOST || '').trim();
+  const brevoKey = String(process.env.BREVO_API_KEY || '').trim();
   let problem = '';
-  if (!host) problem = 'SMTP_HOST is not set';
+  if (brevoKey) {
+    // HTTPS API: works on hosts (Railway Free/Hobby) that block outbound SMTP. Sender must be verified in Brevo.
+    const sender = parseAddress(process.env.PAGEHOUSE_EMAIL_FROM || (emailOk(user.toLowerCase()) ? `Quiet Chapters <${user}>` : ''));
+    if (!sender) problem = 'Set PAGEHOUSE_EMAIL_FROM to the sender address verified in Brevo';
+  } else if (!host) problem = 'SMTP_HOST or BREVO_API_KEY is not set';
   else if (!from) problem = user || process.env.PAGEHOUSE_EMAIL_FROM ? 'PAGEHOUSE_EMAIL_FROM is not a valid address' : 'Set SMTP_USER to the account to send from (for Gmail, your Gmail address)';
   else if (!['starttls', 'tls', 'none'].includes(secure)) problem = 'SMTP_SECURE must be starttls, tls or none';
   else if (secure === 'none' && !isLocalHost(host)) problem = 'SMTP_SECURE=none is only allowed for a mail server on this machine';
@@ -61,6 +66,7 @@ export function emailConfig() {
   return {
     smtp: { host, port: Number(process.env.SMTP_PORT) || (secure === 'tls' ? 465 : 587), secure, user, pass: smtpPassword(host) },
     problem,
+    brevoKey,
     from,
     owner: emailOk(String(process.env.PAGEHOUSE_OWNER_EMAIL || '').trim().toLowerCase()) ? String(process.env.PAGEHOUSE_OWNER_EMAIL).trim().toLowerCase() : '',
     publicUrl: publicUrl(),
@@ -123,9 +129,25 @@ function smtpTransport(row, cfg) {
   });
 }
 
+// Brevo transactional API over HTTPS (https://developers.brevo.com/reference/sendtransacemail).
+async function brevoTransport(row, cfg) {
+  let res;
+  try {
+    res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST', signal: AbortSignal.timeout(20000),
+      headers: { 'api-key': cfg.brevoKey, accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({ sender: { email: cfg.from.email, name: cfg.from.name }, to: [{ email: row.to_email, ...(row.to_name ? { name: row.to_name } : {}) }],
+        subject: row.subject, htmlContent: row.html, textContent: row.text }),
+    });
+  } catch (e) { throw new Error('Could not reach Brevo: ' + e.message); }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(`Brevo ${res.status}: ${body.message || 'send failed'}`), { permanent: res.status === 400 || res.status === 401 || res.status === 403 });
+  return body.messageId || '';
+}
+
 let running = null;
 // Send what is due, oldest first, within the daily cap. Safe to call often; overlapping calls share one run.
-export function processOutbox({ transport = smtpTransport, limit = 25, nowMs = Date.now() } = {}) {
+export function processOutbox({ transport = (row, cfg) => (cfg.brevoKey ? brevoTransport(row, cfg) : smtpTransport(row, cfg)), limit = 25, nowMs = Date.now() } = {}) {
   if (running) return running;
   running = (async () => {
     const cfg = emailConfig(), counts = { sent: 0, failed: 0, retrying: 0, waiting: 0 };
@@ -167,7 +189,7 @@ export function outboxStatus() {
     }));
   return {
     configured: !cfg.problem, problem: cfg.problem, from: cfg.from ? `${cfg.from.name} <${cfg.from.email}>` : '',
-    server: cfg.smtp.host ? `${cfg.smtp.host}:${cfg.smtp.port} (${cfg.smtp.secure}${cfg.smtp.user ? ', signed in' : ''})` : '',
+    server: cfg.brevoKey ? 'Brevo API (HTTPS)' : cfg.smtp.host ? `${cfg.smtp.host}:${cfg.smtp.port} (${cfg.smtp.secure}${cfg.smtp.user ? ', signed in' : ''})` : '',
     ownerAlerts: !!cfg.owner, publicUrl: cfg.publicUrl, dailyLimit: cfg.dailyLimit, sentToday: sentToday(),
     counts: { pending: byStatus.pending || 0, sending: byStatus.sending || 0, sent: byStatus.sent || 0, failed: byStatus.failed || 0 },
     recent,
