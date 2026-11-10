@@ -214,6 +214,12 @@ async function performCheck(bookId, fetcher = fetchPublic, resolver = resolveCat
   const book = db.prepare('SELECT * FROM catalog_books WHERE id=?').get(bookId);
   if (!book || !bookRightsReady(book) || !isSupportedSource(book.source_id)) return { status: 'not_for_sale' };
   if (book.file_key) return { status: 'ready', local: true };
+  // Z-Library hands out one file link per account download, and the daily allowance is small. A check must never
+  // spend it (it did, leaving none for paying customers), so these books are left unchecked until a real download.
+  if (book.source_id === 'zlibrary') {
+    setCheck(book.id, 'ready', { contentType: 'unchecked' });
+    return { status: 'ready', unchecked: true };
+  }
   try {
     const resolved = await resolveBook(book, resolver);
     if (!resolved) {
