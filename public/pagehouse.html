@@ -642,6 +642,7 @@ footer .base{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:space-
           <div class="ring" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div>
           <div><b id="momoText">Approve on your phone</b><span id="momoTimer">3:00</span></div>
         </div>
+        <div class="field" id="otpField" hidden><label for="c-otp">Code sent to your phone</label><input id="c-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="12"><button class="btn line wide" type="button" id="otpBtn">Confirm code</button></div>
         <p class="note">Secured by Paystack</p>
         <button class="btn wide" type="submit" id="payBtn">Continue to secure checkout</button>
         <button class="btn line wide" type="button" id="verifyReturn" hidden>Check payment and show downloads</button>
@@ -999,6 +1000,21 @@ function showDownloads(order){
 }
 var momoPoll=null;
 function stopMomo(){if(momoPoll){clearInterval(momoPoll);momoPoll=null;}document.getElementById('momoWait').hidden=true;}
+function askOtp(reference,email){
+  var f=document.getElementById('otpField'),i=document.getElementById('c-otp'),b=document.getElementById('otpBtn');
+  f.hidden=false;i.value='';i.focus();
+  return new Promise(function(resolve,reject){
+    b.onclick=async function(){
+      var code=i.value.trim();if(!code)return;b.disabled=true;
+      try{
+        var r=await fetch('/api/store/orders/'+encodeURIComponent(reference)+'/otp',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({email:email,otp:code})});
+        var d=await r.json();if(!r.ok)throw new Error(d.error||'The code was not accepted.');
+        if(d.needsOtp){i.value='';showMessage(d.displayText||'Enter the new code.');b.disabled=false;return;}
+        f.hidden=true;resolve(d);
+      }catch(e){f.hidden=true;reject(e);}
+    };
+  });
+}
 async function waitForMomo(reference,email,text){
   var wait=document.getElementById('momoWait'),until=Date.now()+190000,busy=false;
   document.getElementById('momoText').textContent=text||'Approve the payment on your phone';wait.hidden=false;
@@ -1031,6 +1047,7 @@ document.getElementById('payForm').addEventListener('submit',async function(e){
       var res=await fetch('/api/store/checkout/momo',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({bookIds:bag,email:email,phone:phone,idempotencyKey:key})});
       var data=await res.json();if(!res.ok)throw new Error(data.error||'The payment could not be started.');
       button.textContent='Waiting for approval…';
+      if(data.needsOtp&&data.status!=='paid'){showMessage(data.displayText||'Enter the code sent to your phone.');data=await askOtp(data.reference,email);}
       var order=data.status==='paid'?data:await waitForMomo(data.reference,email,data.displayText);
       var full=await (await fetch('/api/store/orders/'+encodeURIComponent(data.reference)+'/verify',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({email:email})})).json();
       showDownloads(full.items?full:order);
@@ -1044,7 +1061,7 @@ document.getElementById('payForm').addEventListener('submit',async function(e){
       if(!data2.authorizationUrl||!(/^https:\/\//i.test(data2.authorizationUrl)||/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(data2.authorizationUrl)))throw new Error('Secure checkout is unavailable right now.');
       location.assign(data2.authorizationUrl);return;
     }
-  }catch(err){showMessage(err.message||'Checkout could not be started.');}
+  }catch(err){try{sessionStorage.removeItem('pagehouse-checkout-key');}catch(_){}showMessage(err.message||'Checkout could not be started.');}
   finally{button.disabled=bag.length===0;button.textContent=bag.length?payLabel():'Pay';}
 });
 var returnRef=new URLSearchParams(location.search).get('reference')||new URLSearchParams(location.search).get('trxref');

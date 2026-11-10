@@ -152,7 +152,7 @@ const OPEN = [
     [/^\/api\/store\/catalog$/, 'GET'], [/^\/api\/store\/catalog\/categories$/, 'GET'], [/^\/api\/store\/catalog\/[a-f0-9]{32}(?:\/cover)?$/, 'GET'],
     [/^\/api\/store\/source-search$/, 'GET'], [/^\/api\/store\/source-results\/[a-z0-9]{1,40}$/, 'POST'],
     [/^\/api\/store\/checkout$/, 'POST'], [/^\/api\/store\/orders\/PH-[a-f0-9]{36}$/, 'GET'],
-    [/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/, 'POST'], [/^\/api\/store\/download\/[A-Za-z0-9_.-]+$/, 'GET'],
+    [/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/verify$/, 'POST'], [/^\/api\/store\/orders\/PH-[a-f0-9]{36}\/otp$/, 'POST'], [/^\/api\/store\/download\/[A-Za-z0-9_.-]+$/, 'GET'],
     [/^\/api\/store\/requests$/, 'POST'], [/^\/api\/store\/checkout\/momo$/, 'POST'], [/^\/api\/store\/library$/, 'GET'],
     [/^\/api\/store\/library\/(logout|passkeys\/(register|login)(-options)?)$/, 'POST'], [/^\/api\/store\/requests\/RQ-[a-f0-9]{24}$/, 'GET'],
     [/^\/events$/, 'GET'], [/^\/files\/[a-f0-9]+$/, 'GET'], [/^\/cover$/, 'GET'],
@@ -534,6 +534,14 @@ async function api(req, res, url, me) {
     if ((mm = p.match(/^\/api\/store\/orders\/(PH-[a-f0-9]{36})$/)) && m === 'GET') {
         const order = pagehousePayments.getOrderForBuyer(mm[1], url.searchParams.get('email') || '');
         return order ? send(res, 200, order, { 'Cache-Control': 'no-store' }) : send(res, 404, { error: 'Order not found' });
+    }
+    if ((mm = p.match(/^\/api\/store\/orders\/(PH-[a-f0-9]{36})\/otp$/)) && m === 'POST') {
+        try {
+            const b = await json(req);
+            const result = await pagehousePayments.submitMomoOtp(mm[1], b.email || '', b.otp);
+            if (result.status === 'paid') sendEmails();
+            return send(res, 200, result);
+        } catch (e) { return fail(res, e, e.statusCode || 400); }
     }
     if ((mm = p.match(/^\/api\/store\/orders\/(PH-[a-f0-9]{36})\/verify$/)) && m === 'POST') {
         try {
@@ -982,7 +990,7 @@ const server = http.createServer(async (req, res) => {
             if (auth.apiNeedsKey() && !me.user && !auth.apiKeyOk(req)) return send(res, 401, { error: 'Missing or invalid X-API-Key' }, API_CORS);
         }
         if (isStaticPage(p, req)) { serveStatic(p, res, req); return; }
-        const publicStoreRoute = /^\/api\/store\/(catalog(?:\/[a-f0-9]{32}(?:\/cover)?|\/categories)?|source-search|source-results\/[a-z0-9]{1,40}|checkout|orders\/PH-[a-f0-9]{36}(?:\/verify)?|download\/[A-Za-z0-9_.-]+|requests(?:\/RQ-[a-f0-9]{24})?|checkout\/momo|library(?:\/logout|\/passkeys\/(?:register|login)(?:-options)?)?)$/.test(p);
+        const publicStoreRoute = /^\/api\/store\/(catalog(?:\/[a-f0-9]{32}(?:\/cover)?|\/categories)?|source-search|source-results\/[a-z0-9]{1,40}|checkout|orders\/PH-[a-f0-9]{36}(?:\/verify|\/otp)?|download\/[A-Za-z0-9_.-]+|requests(?:\/RQ-[a-f0-9]{24})?|checkout\/momo|library(?:\/logout|\/passkeys\/(?:register|login)(?:-options)?)?)$/.test(p);
         if (!p.startsWith('/api/v1/') && me.role === 'none' && !publicStoreRoute) return fail(res, 'Sign in first', 401);
         if (me.role !== 'admin' && !p.startsWith('/api/v1/') && !OPEN.some(([re, meth]) => re.test(p) && (!meth || meth === req.method))) return fail(res, 'Only an admin can do that', 403);
 

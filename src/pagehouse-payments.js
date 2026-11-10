@@ -236,15 +236,34 @@ export async function createMomoCharge(input, fetchImpl = fetch, ctx = {}) {
       body: JSON.stringify({ email: prepared.buyer, amount: prepared.amount, currency: 'GHS', reference,
         mobile_money: { phone: phone.local, provider }, metadata: { order_id: id, book_count: prepared.products.length } }),
     }, fetchImpl);
+    console.log('[momo] paystack charge', JSON.stringify({ provider, status: data.status, display_text: data.display_text, gateway_response: data.gateway_response, message: data.message }));
     if (data.reference && data.reference !== reference) throw new Error('Paystack charge response did not match this order');
     if (data.status === 'failed') throw new Error(clean(data.gateway_response || data.message || 'The payment was declined', 200));
     if (data.status === 'success') markPaid(await verifiedTransaction(reference, fetchImpl));
     const order = orderByRef.get(reference);
-    return { ...orderSnapshot(order), channel: 'momo', displayText: clean(data.display_text || 'Approve the payment on your phone with your MoMo PIN.', 300) };
+    return { ...orderSnapshot(order), channel: 'momo', needsOtp: data.status === 'send_otp',
+      displayText: clean(data.display_text || (data.status === 'send_otp' ? 'Enter the code sent to your phone.' : 'Approve the payment on your phone with your MoMo PIN.'), 300) };
   } catch (e) {
     db.prepare("UPDATE store_orders SET status='failed' WHERE id=? AND status='pending'").run(id);
     throw e;
   }
+}
+
+// Some networks (e.g. Vodafone) answer the charge with send_otp: the customer types the code they were sent.
+export async function submitMomoOtp(reference, buyerEmail, otp, fetchImpl = fetch) {
+  const code = clean(otp, 12).replace(/\s/g, '');
+  if (!/^[A-Za-z0-9]{3,12}$/.test(code)) throw new Error('Enter the code you were sent');
+  const order = getOrderForBuyer(reference, buyerEmail) && orderByRef.get(reference);
+  if (!order || order.channel !== 'momo') throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+  if (order.status !== 'pending') throw new Error('This payment is no longer waiting for a code');
+  const data = await paystack('/charge/submit_otp', { method: 'POST', body: JSON.stringify({ otp: code, reference }) }, fetchImpl);
+  if (data.status === 'failed') {
+    db.prepare("UPDATE store_orders SET status='failed' WHERE id=? AND status='pending'").run(order.id);
+    throw new Error(clean(data.gateway_response || data.message || 'The code was not accepted', 200));
+  }
+  if (data.status === 'success') markPaid(await verifiedTransaction(reference, fetchImpl));
+  return { ...orderSnapshot(orderByRef.get(reference)), channel: 'momo', needsOtp: data.status === 'send_otp',
+    displayText: clean(data.display_text || 'Approve the payment on your phone with your MoMo PIN.', 300) };
 }
 
 async function verifiedTransaction(reference, fetchImpl = fetch) {
