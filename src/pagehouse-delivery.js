@@ -161,6 +161,7 @@ function totalSize(response) {
 }
 
 function setCheck(bookId, status, { size = 0, contentType = '', error = '', retryMs = 0 } = {}) {
+  if (error) console.warn(`[delivery] book ${String(bookId).slice(0, 8)} ${status}: ${String(error).slice(0, 200)}`);
   const checkedAt = stamp();
   db.prepare(`INSERT INTO store_download_checks(book_id,checked_at,size,content_type,error,retry_after)
     VALUES(?,?,?,?,?,?) ON CONFLICT(book_id) DO UPDATE SET checked_at=excluded.checked_at,
