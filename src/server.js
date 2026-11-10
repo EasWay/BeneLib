@@ -558,8 +558,14 @@ async function api(req, res, url, me) {
         const grant = pagehousePayments.getDownloadGrant(mm[1]);
         if (!grant) return send(res, 404, { error: 'Download link is invalid, expired or already used' });
         if (!grant.fileKey) {
-            const result = await pagehouseDelivery.streamBook(grant, req, res, pagehousePayments);
-            if (result.error && !res.headersSent) return fail(res, result.error, result.statusCode);
+            try {
+                const result = await pagehouseDelivery.streamBook(grant, req, res, pagehousePayments);
+                if (result.error && !res.headersSent) return fail(res, result.error, result.statusCode);
+            } catch (e) {
+                console.error('[delivery] download failed:', e && e.stack || e);
+                if (!res.headersSent) return fail(res, 'The file could not be delivered. Try again in a minute.', 502);
+                res.destroy();
+            }
             return;
         }
         const f = pagehousePayments.consumeDownloadToken(mm[1]);

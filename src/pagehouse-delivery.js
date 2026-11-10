@@ -568,7 +568,8 @@ export async function streamBook(grant, req, res, payments, fetcher = fetchPubli
     reachesEnd = !!(parsedRange && size && Number(parsedRange[2]) === size - 1);
     res.writeHead(206, headers);
   } else {
-    if (size) headers['Content-Length'] = String(size);
+    // fetch() decodes gzip/br bodies, so an upstream length would no longer match the bytes we send.
+    if (size && !response.headers.get('content-encoding')) headers['Content-Length'] = String(size);
     res.writeHead(200, headers);
   }
   let delivered = 0;
