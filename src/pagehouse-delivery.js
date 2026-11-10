@@ -9,6 +9,7 @@ import { supabaseConfigured, uploadStorageObject, downloadStorageObject, upsertR
 
 const DAY = 864e5;
 const MAX_FILE_BYTES = 500 * 1024 * 1024;
+const CACHE_MAX_BYTES = 40 * 1024 * 1024;
 const CHECK_BATCH = 5;
 const CHECK_DELAY_MS = 1100;
 const stamp = () => new Date().toISOString();
@@ -391,22 +392,8 @@ export async function streamBook(grant, req, res, payments, fetcher = fetchPubli
   if (!book || !bookRightsReady(book) || !isSupportedSource(book.source_id)) {
     return { error: 'This book is not available for sale', statusCode: 404 };
   }
-  let resolved;
-  try { resolved = await resolveBook({ ...book, source_id: grant.sourceId, source_ref: grant.sourceRef }, resolver); }
-  catch (error) { setCheck(book.id, 'queued', { error: String(error.message || error), retryMs: DAY }); return { error: 'The file could not be checked. Try again later.', statusCode: 502 }; }
-  if (!resolved) { setCheck(book.id, 'queued', { error: 'No downloadable file is available from this source record', retryMs: DAY }); return { error: 'This book is not available for delivery', statusCode: 404 }; }
-
-  const requestRange = req.headers.range || '';
-  let range = null;
-  if (requestRange) {
-    const match = requestRange.match(/^bytes=(\d+)-(\d*)$/);
-    if (!match) return { error: 'Only a single byte range is supported', statusCode: 416 };
-    range = { start: Number(match[1]), end: match[2] ? Number(match[2]) : null };
-    if (!Number.isSafeInteger(range.start) || (range.end !== null && (!Number.isSafeInteger(range.end) || range.end < range.start))) return { error: 'Invalid byte range', statusCode: 416 };
-  }
-
   // If the book's PDF is already cached in Supabase Storage, serve it directly without hitting the external source.
-  if (!range && supabaseConfigured()) {
+  if (!req.headers.range && supabaseConfigured()) {
     const cachedPdf = await downloadStorageObject(`books/${book.id}.pdf`).catch(() => null);
     if (cachedPdf && fileSignatureOk('pdf', cachedPdf)) {
       if (!await payments.reserveDownload(grant)) {
@@ -429,6 +416,20 @@ export async function streamBook(grant, req, res, payments, fetcher = fetchPubli
       if (!res.destroyed) payments.completeRemoteDownload(grant);
       return { streamed: true };
     }
+  }
+
+  let resolved;
+  try { resolved = await resolveBook({ ...book, source_id: grant.sourceId, source_ref: grant.sourceRef }, resolver); }
+  catch (error) { setCheck(book.id, 'queued', { error: String(error.message || error), retryMs: DAY }); return { error: 'The file could not be checked. Try again later.', statusCode: 502 }; }
+  if (!resolved) { setCheck(book.id, 'queued', { error: 'No downloadable file is available from this source record', retryMs: DAY }); return { error: 'This book is not available for delivery', statusCode: 404 }; }
+
+  const requestRange = req.headers.range || '';
+  let range = null;
+  if (requestRange) {
+    const match = requestRange.match(/^bytes=(\d+)-(\d*)$/);
+    if (!match) return { error: 'Only a single byte range is supported', statusCode: 416 };
+    range = { start: Number(match[1]), end: match[2] ? Number(match[2]) : null };
+    if (!Number.isSafeInteger(range.start) || (range.end !== null && (!Number.isSafeInteger(range.end) || range.end < range.start))) return { error: 'Invalid byte range', statusCode: 416 };
   }
 
   let response, prefix;
@@ -579,12 +580,18 @@ export async function streamBook(grant, req, res, payments, fetcher = fetchPubli
     res.writeHead(200, headers);
   }
   let delivered = 0;
+  // Keep a copy of a fully delivered PDF so the next buyer never touches the source (Z-Library meters every link).
+  const keep = !range && resolved.format === 'pdf' && supabaseConfigured() && (!size || size <= CACHE_MAX_BYTES) ? [] : null;
   const stream = (async function* () {
     try {
       if (prefix) {
-        for await (const chunk of prefix.stream) { delivered += chunk.length; yield chunk; }
+        for await (const chunk of prefix.stream) { delivered += chunk.length; keep?.push(chunk); yield chunk; }
       } else {
-        for await (const chunk of response.body || []) { delivered += chunk.length; yield Buffer.from(chunk); }
+        for await (const chunk of response.body || []) { delivered += chunk.length; const buf = Buffer.from(chunk); keep?.push(buf); yield buf; }
+      }
+      if (keep && delivered && delivered <= CACHE_MAX_BYTES && (!size || delivered === size)) {
+        const whole = Buffer.concat(keep);
+        if (fileSignatureOk('pdf', whole)) uploadStorageObject(`books/${book.id}.pdf`, whole, 'application/pdf').catch(() => {});
       }
       if (reachesEnd && (size || delivered)) {
         setCheck(book.id, 'ready', { size: size || delivered, contentType: response.headers.get('content-type') || '' });
