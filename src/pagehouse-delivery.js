@@ -173,6 +173,36 @@ function setCheck(bookId, status, { size = 0, contentType = '', error = '', retr
     .run(status, checkedAt, bookId);
 }
 
+// A source can list a file under the wrong format (LibGen's primary hit for one title was a MOBI labelled PDF) while
+// its fallback mirrors hold real PDFs. Probe each candidate's header and promote the first deliverable one.
+async function promoteDeliverableCandidate(resolved, fetcher) {
+  const fallbacks = resolved.fallbacks || [];
+  if (!fallbacks.length) return;
+  const list = [{ url: resolved.url, format: resolved.format, size: resolved.size }, ...fallbacks];
+  for (let i = 0; i < list.length; i++) {
+    try {
+      const res = await fetcher(list[i].url, {
+        headers: { Range: 'bytes=0-7', 'User-Agent': currentUA(), Accept: '*/*' },
+        signal: AbortSignal.timeout(15000),
+      }, { allowedHosts: resolved.hosts });
+      if (![200, 206].includes(res.status) || /text\/html/i.test(res.headers.get('content-type') || '')) {
+        if (res.body) res.body.cancel().catch(() => {});
+        continue;
+      }
+      const magic = await prefixFrom(res, 8);
+      await magic.cancel();
+      const format = ['pdf', 'epub', 'zip'].find(candidate => fileSignatureOk(candidate, magic.prefix));
+      if (!format) continue;
+      if (i > 0) {
+        resolved.url = list[i].url; resolved.size = list[i].size || resolved.size;
+        resolved.fallbacks = list.filter((_, index) => index !== i).map(({ url, format, size }) => ({ url, format, size }));
+      }
+      resolved.format = format;
+      return;
+    } catch { /* try the next mirror */ }
+  }
+}
+
 async function fetchWithMirrorFallback(resolved, init, fetcher, timeoutMs = 12000) {
   const candidates = [{ url: resolved.url, format: resolved.format, size: resolved.size }, ...(resolved.fallbacks || [])];
   let lastRes = null, lastUrl = resolved.url;
@@ -422,6 +452,8 @@ export async function streamBook(grant, req, res, payments, fetcher = fetchPubli
   try { resolved = await resolveBook({ ...book, source_id: grant.sourceId, source_ref: grant.sourceRef }, resolver); }
   catch (error) { setCheck(book.id, 'queued', { error: String(error.message || error), retryMs: DAY }); return { error: 'The file could not be checked. Try again later.', statusCode: 502 }; }
   if (!resolved) { setCheck(book.id, 'queued', { error: 'No downloadable file is available from this source record', retryMs: DAY }); return { error: 'This book is not available for delivery', statusCode: 404 }; }
+
+  await promoteDeliverableCandidate(resolved, fetcher);
 
   const requestRange = req.headers.range || '';
   let range = null;
